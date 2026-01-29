@@ -44,9 +44,11 @@ final class PollingService {
         lastError = nil
 
         do {
-            let sinceDate = Calendar.current.date(
+            // Use startOfDay to ensure we capture all entries from the first day
+            let rawDate = Calendar.current.date(
                 byAdding: .day, value: -(AppConstants.rollingFetchDays - 1), to: Date()
             )!
+            let sinceDate = Calendar.current.startOfDay(for: rawDate)
             let response = try await ccUsageService.fetchUsage(since: sinceDate)
             try persistResponse(response)
             lastPollTime = Date()
