@@ -1,0 +1,25 @@
+name: ClaudeWatch
+options:
+  bundleIdPrefix: com.claudewatch
+  deploymentTarget:
+    macOS: "15.0"
+  xcodeVersion: "26.2"
+  minimumXcodeGenVersion: "2.40"
+
+targets:
+  ClaudeWatch:
+    type: application
+    platform: macOS
+    sources:
+      - ClaudeWatch
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.claudewatch.app
+        PRODUCT_NAME: Claude Watch
+        SWIFT_VERSION: "6.0"
+        MACOSX_DEPLOYMENT_TARGET: "15.0"
+        INFOPLIST_FILE: ClaudeWatch/Info.plist
+        GENERATE_INFOPLIST_FILE: false
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGNING_REQUIRED: false
+        ENABLE_APP_SANDBOX: false
