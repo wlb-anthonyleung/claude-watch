@@ -392,13 +392,11 @@ struct OverviewView: View {
                     Button {
                         selectedItem = .day(day.date)
                     } label: {
-                        HStack(spacing: 0) {
+                        HStack(alignment: .top, spacing: 0) {
                             Text(day.date)
                                 .frame(width: 90, alignment: .leading)
                             Text(modelsString(for: day))
                                 .frame(width: 120, alignment: .leading)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
                             Text(Formatters.formatCompactNumber(day.inputTokens))
                                 .frame(width: 70, alignment: .trailing)
                             Text(Formatters.formatCompactNumber(day.outputTokens))
@@ -455,8 +453,8 @@ struct OverviewView: View {
     }
 
     private func modelsString(for day: DailyUsage) -> String {
-        let models = day.modelBreakdowns.map { Formatters.formatModelName($0.modelName) }
-        return models.isEmpty ? "Unknown" : models.joined(separator: ", ")
+        let models = day.modelBreakdowns.map { "- " + Formatters.formatModelNameCLI($0.modelName) }
+        return models.isEmpty ? "Unknown" : models.joined(separator: "\n")
     }
 
     @ViewBuilder

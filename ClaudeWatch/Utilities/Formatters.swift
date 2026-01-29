@@ -65,6 +65,29 @@ enum Formatters {
         return rawName
     }
 
+    /// Formats model name in ccusage CLI style (e.g., "haiku-4-5", "opus-4-5").
+    static func formatModelNameCLI(_ rawName: String) -> String {
+        let mapping: [String: String] = [
+            "claude-opus-4-5-20251101": "opus-4-5",
+            "claude-sonnet-4-5-20250514": "sonnet-4-5",
+            "claude-haiku-4-5-20251001": "haiku-4-5",
+            "claude-sonnet-4-20250514": "sonnet-4",
+            "claude-haiku-3-5-20241022": "haiku-3-5",
+            "<synthetic>": "<synthetic>",
+        ]
+
+        if let friendly = mapping[rawName] {
+            return friendly
+        }
+
+        // Fallback: extract model family and version from the name
+        return rawName
+            .replacingOccurrences(of: "claude-", with: "")
+            .components(separatedBy: "-")
+            .prefix(3)
+            .joined(separator: "-")
+    }
+
     static func formatDateString(_ dateString: String) -> String {
         let inputFormatter = DateFormatter()
         inputFormatter.dateFormat = "yyyy-MM-dd"
