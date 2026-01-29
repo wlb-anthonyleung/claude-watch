@@ -26,6 +26,25 @@ enum Formatters {
         }
     }
 
+    /// Formats a number compactly for table display (e.g., 134.1K, 1.2M).
+    static func formatCompactNumber(_ count: Int) -> String {
+        switch count {
+        case 0:
+            return "-"
+        case 1..<1_000:
+            return "\(count)"
+        case 1_000..<1_000_000:
+            let value = Double(count) / 1_000.0
+            return String(format: "%.1fK", value)
+        case 1_000_000..<1_000_000_000:
+            let value = Double(count) / 1_000_000.0
+            return String(format: "%.1fM", value)
+        default:
+            let value = Double(count) / 1_000_000_000.0
+            return String(format: "%.1fB", value)
+        }
+    }
+
     static func formatModelName(_ rawName: String) -> String {
         let mapping: [String: String] = [
             "claude-opus-4-5-20251101": "Opus 4.5",

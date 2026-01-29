@@ -92,6 +92,7 @@ struct OverviewView: View {
                 monthPicker
                 summaryRow
                 costChart
+                usageTable
             }
             .padding()
         }
@@ -347,6 +348,115 @@ struct OverviewView: View {
         }
         .padding()
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    // MARK: - Usage Table
+
+    private var usageTable: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Daily Breakdown")
+                .font(.headline)
+
+            if monthUsage.isEmpty {
+                Text("No data for this month.")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 100)
+            } else {
+                // Table header
+                HStack(spacing: 0) {
+                    Text("Date")
+                        .frame(width: 90, alignment: .leading)
+                    Text("Models")
+                        .frame(width: 120, alignment: .leading)
+                    Text("Input")
+                        .frame(width: 70, alignment: .trailing)
+                    Text("Output")
+                        .frame(width: 70, alignment: .trailing)
+                    Text("Cache Create")
+                        .frame(width: 90, alignment: .trailing)
+                    Text("Cache Read")
+                        .frame(width: 90, alignment: .trailing)
+                    Text("Total Tokens")
+                        .frame(width: 90, alignment: .trailing)
+                    Text("Cost (USD)")
+                        .frame(width: 80, alignment: .trailing)
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+
+                Divider()
+
+                // Table rows
+                ForEach(monthUsage.reversed(), id: \.date) { day in
+                    Button {
+                        selectedItem = .day(day.date)
+                    } label: {
+                        HStack(spacing: 0) {
+                            Text(Formatters.ddmmDateLabel(day.date))
+                                .frame(width: 90, alignment: .leading)
+                            Text(modelsString(for: day))
+                                .frame(width: 120, alignment: .leading)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                            Text(Formatters.formatCompactNumber(day.inputTokens))
+                                .frame(width: 70, alignment: .trailing)
+                            Text(Formatters.formatCompactNumber(day.outputTokens))
+                                .frame(width: 70, alignment: .trailing)
+                            Text(Formatters.formatCompactNumber(day.cacheCreationTokens))
+                                .frame(width: 90, alignment: .trailing)
+                            Text(Formatters.formatCompactNumber(day.cacheReadTokens))
+                                .frame(width: 90, alignment: .trailing)
+                            Text(Formatters.formatCompactNumber(day.totalTokens))
+                                .frame(width: 90, alignment: .trailing)
+                            Text(Formatters.formatCost(day.totalCost))
+                                .frame(width: 80, alignment: .trailing)
+                        }
+                        .font(.caption.monospacedDigit())
+                        .padding(.vertical, 4)
+                        .padding(.horizontal, 8)
+                        .background(Color.primary.opacity(0.001)) // For tap area
+                    }
+                    .buttonStyle(.plain)
+
+                    if day.date != monthUsage.first?.date {
+                        Divider()
+                    }
+                }
+
+                // Total row
+                Divider()
+                HStack(spacing: 0) {
+                    Text("Total")
+                        .frame(width: 90, alignment: .leading)
+                    Text("")
+                        .frame(width: 120, alignment: .leading)
+                    Text(Formatters.formatCompactNumber(monthUsage.reduce(0) { $0 + $1.inputTokens }))
+                        .frame(width: 70, alignment: .trailing)
+                    Text(Formatters.formatCompactNumber(monthUsage.reduce(0) { $0 + $1.outputTokens }))
+                        .frame(width: 70, alignment: .trailing)
+                    Text(Formatters.formatCompactNumber(monthUsage.reduce(0) { $0 + $1.cacheCreationTokens }))
+                        .frame(width: 90, alignment: .trailing)
+                    Text(Formatters.formatCompactNumber(monthUsage.reduce(0) { $0 + $1.cacheReadTokens }))
+                        .frame(width: 90, alignment: .trailing)
+                    Text(Formatters.formatCompactNumber(totalTokens))
+                        .frame(width: 90, alignment: .trailing)
+                    Text(Formatters.formatCost(totalCost))
+                        .frame(width: 80, alignment: .trailing)
+                        .foregroundStyle(.green)
+                }
+                .font(.caption.weight(.semibold).monospacedDigit())
+                .padding(.vertical, 4)
+                .padding(.horizontal, 8)
+            }
+        }
+        .padding()
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func modelsString(for day: DailyUsage) -> String {
+        let models = day.modelBreakdowns.map { Formatters.formatModelName($0.modelName) }
+        return models.isEmpty ? "Unknown" : models.joined(separator: ", ")
     }
 
     @ViewBuilder
