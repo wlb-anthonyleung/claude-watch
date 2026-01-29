@@ -1,117 +1,103 @@
 import Foundation
 
 enum CCUsageError: Error, LocalizedError {
-    case processFailure(String)
-    case decodingFailure(Error)
-    case npxNotFound
+    case parsingFailure(String)
 
     var errorDescription: String? {
         switch self {
-        case .processFailure(let msg): return "ccusage failed: \(msg)"
-        case .decodingFailure(let err): return "JSON decode error: \(err.localizedDescription)"
-        case .npxNotFound: return "npx not found. Ensure Node.js is installed."
+        case .parsingFailure(let msg): return "Parsing failed: \(msg)"
         }
     }
 }
 
+/// Service that provides Claude usage data by parsing local JSONL files.
+/// Replaces the previous npx ccusage dependency with native Swift parsing.
 actor CCUsageService {
-    var npxPath: String
+    private let conversationService: ConversationService
+    private let pricingService: PricingService
 
-    init(npxPath: String = AppConstants.defaultNpxPath) {
-        self.npxPath = npxPath
+    init() {
+        self.pricingService = PricingService()
+        self.conversationService = ConversationService(pricingService: pricingService)
     }
 
-    func updateNpxPath(_ path: String) {
-        self.npxPath = path
-    }
-
+    /// Fetches daily usage data since the given date.
     func fetchUsage(since date: Date) async throws -> CCUsageResponse {
-        let dateString = Self.formatDate(date)
-        let arguments = ["ccusage", "--json", "--since", dateString, "--offline"]
+        let dailyData = await conversationService.fetchDailyUsage(since: date)
 
-        let (stdout, stderr, exitCode) = try await runProcess(
-            executablePath: npxPath,
-            arguments: arguments
+        // Convert to CCUsageResponse format
+        let daily = dailyData.map { day in
+            CCDailyEntry(
+                date: day.date,
+                inputTokens: day.inputTokens,
+                outputTokens: day.outputTokens,
+                cacheCreationTokens: day.cacheCreationTokens,
+                cacheReadTokens: day.cacheReadTokens,
+                totalTokens: day.totalTokens,
+                totalCost: day.totalCost,
+                modelsUsed: day.modelBreakdowns.map(\.modelName),
+                modelBreakdowns: day.modelBreakdowns.map { breakdown in
+                    CCModelBreakdown(
+                        modelName: breakdown.modelName,
+                        inputTokens: breakdown.inputTokens,
+                        outputTokens: breakdown.outputTokens,
+                        cacheCreationTokens: breakdown.cacheCreationTokens,
+                        cacheReadTokens: breakdown.cacheReadTokens,
+                        cost: breakdown.cost
+                    )
+                }
+            )
+        }
+
+        // Calculate totals
+        let totals = CCTotals(
+            inputTokens: daily.reduce(0) { $0 + $1.inputTokens },
+            outputTokens: daily.reduce(0) { $0 + $1.outputTokens },
+            cacheCreationTokens: daily.reduce(0) { $0 + $1.cacheCreationTokens },
+            cacheReadTokens: daily.reduce(0) { $0 + $1.cacheReadTokens },
+            totalCost: daily.reduce(0) { $0 + $1.totalCost },
+            totalTokens: daily.reduce(0) { $0 + $1.totalTokens }
         )
 
-        guard exitCode == 0 else {
-            throw CCUsageError.processFailure(stderr)
-        }
-
-        guard let data = stdout.data(using: .utf8) else {
-            throw CCUsageError.processFailure("Empty output")
-        }
-
-        do {
-            return try JSONDecoder().decode(CCUsageResponse.self, from: data)
-        } catch {
-            throw CCUsageError.decodingFailure(error)
-        }
+        return CCUsageResponse(daily: daily, totals: totals)
     }
 
     /// Fetches session data for a specific date.
     func fetchSessions(for date: Date) async throws -> CCSessionResponse {
-        let dateString = Self.formatDate(date)
-        let arguments = ["ccusage", "session", "--json", "--since", dateString, "--until", dateString, "--offline"]
+        let sessionData = await conversationService.fetchSessionUsage(for: date)
 
-        let (stdout, stderr, exitCode) = try await runProcess(
-            executablePath: npxPath,
-            arguments: arguments
+        // Convert to CCSessionResponse format
+        let sessions = sessionData.map { session in
+            CCSessionEntry(
+                sessionId: session.id,
+                inputTokens: session.inputTokens,
+                outputTokens: session.outputTokens,
+                cacheCreationTokens: session.cacheCreationTokens,
+                cacheReadTokens: session.cacheReadTokens,
+                totalTokens: session.totalTokens,
+                totalCost: session.totalCost,
+                lastActivity: ISO8601DateFormatter().string(from: session.endTime),
+                modelsUsed: Array(session.modelsUsed),
+                modelBreakdowns: [], // Session-level model breakdowns not implemented yet
+                projectPath: session.projectPath
+            )
+        }
+
+        // Calculate totals
+        let totals = CCTotals(
+            inputTokens: sessions.reduce(0) { $0 + $1.inputTokens },
+            outputTokens: sessions.reduce(0) { $0 + $1.outputTokens },
+            cacheCreationTokens: sessions.reduce(0) { $0 + $1.cacheCreationTokens },
+            cacheReadTokens: sessions.reduce(0) { $0 + $1.cacheReadTokens },
+            totalCost: sessions.reduce(0) { $0 + $1.totalCost },
+            totalTokens: sessions.reduce(0) { $0 + $1.totalTokens }
         )
 
-        guard exitCode == 0 else {
-            throw CCUsageError.processFailure(stderr)
-        }
-
-        guard let data = stdout.data(using: .utf8) else {
-            throw CCUsageError.processFailure("Empty output")
-        }
-
-        do {
-            return try JSONDecoder().decode(CCSessionResponse.self, from: data)
-        } catch {
-            throw CCUsageError.decodingFailure(error)
-        }
+        return CCSessionResponse(sessions: sessions, totals: totals)
     }
 
-    private func runProcess(executablePath: String, arguments: [String]) async throws -> (String, String, Int32) {
-        try await withCheckedThrowingContinuation { continuation in
-            let process = Process()
-            let stdoutPipe = Pipe()
-            let stderrPipe = Pipe()
-
-            process.executableURL = URL(fileURLWithPath: executablePath)
-            process.arguments = arguments
-            process.standardOutput = stdoutPipe
-            process.standardError = stderrPipe
-
-            // GUI apps don't inherit the user's shell PATH
-            var env = ProcessInfo.processInfo.environment
-            let additionalPaths = ["/opt/homebrew/bin", "/usr/local/bin"]
-            let currentPath = env["PATH"] ?? "/usr/bin:/bin"
-            env["PATH"] = (additionalPaths + [currentPath]).joined(separator: ":")
-            process.environment = env
-
-            do {
-                try process.run()
-                process.waitUntilExit()
-
-                let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-                let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-
-                let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
-                let stderr = String(data: stderrData, encoding: .utf8) ?? ""
-
-                continuation.resume(returning: (stdout, stderr, process.terminationStatus))
-            } catch {
-                continuation.resume(throwing: error)
-            }
-        }
-    }
-
-    private static func formatDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMdd"
-        return formatter.string(from: date)
+    /// Refreshes pricing data from LiteLLM.
+    func refreshPricing() async throws {
+        _ = try await pricingService.getPricing()
     }
 }

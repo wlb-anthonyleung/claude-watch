@@ -38,12 +38,6 @@ final class PollingService {
         scheduleTimer()
     }
 
-    func updateNpxPath(_ path: String) {
-        Task {
-            await ccUsageService.updateNpxPath(path)
-        }
-    }
-
     func pollNow() async {
         guard !isPolling else { return }
         isPolling = true
