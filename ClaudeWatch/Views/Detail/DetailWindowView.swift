@@ -38,7 +38,21 @@ struct DetailWindowView: View {
             }
         }
         .toolbar {
-            ToolbarItem(placement: .automatic) {
+            ToolbarItemGroup(placement: .automatic) {
+                Button {
+                    Task { await ExportService.saveCSV(allUsage) }
+                } label: {
+                    Label("Export CSV", systemImage: "doc.text")
+                }
+                .help("Export to CSV")
+
+                Button {
+                    Task { await ExportService.saveXLSX(allUsage) }
+                } label: {
+                    Label("Export Excel", systemImage: "tablecells")
+                }
+                .help("Export to Excel")
+
                 Button {
                     Task { await pollingService.pollNow() }
                 } label: {
