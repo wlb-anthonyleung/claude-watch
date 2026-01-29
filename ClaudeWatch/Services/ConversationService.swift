@@ -446,10 +446,14 @@ private struct ConversationEntry: Decodable {
     let requestId: String?
     let message: MessageContent?
 
-    /// Unique key for deduplication (messageId + requestId)
+    /// Unique key for deduplication (messageId + requestId + timestamp fallback)
     var dedupeKey: String {
         let msgId = message?.id ?? uuid ?? ""
         let reqId = requestId ?? ""
+        // If both are empty, use timestamp to avoid over-deduplication
+        if msgId.isEmpty && reqId.isEmpty {
+            return "ts:\(timestamp ?? UUID().uuidString)"
+        }
         return "\(msgId)|\(reqId)"
     }
 }
@@ -483,10 +487,14 @@ private struct ParsedEntry: Decodable {
     let message: ParsedMessageContent?
     var parsedTimestamp: Date?
 
-    /// Unique key for deduplication (messageId + requestId)
+    /// Unique key for deduplication (messageId + requestId + timestamp fallback)
     var dedupeKey: String {
         let msgId = message?.id ?? uuid ?? ""
         let reqId = requestId ?? ""
+        // If both are empty, use timestamp to avoid over-deduplication
+        if msgId.isEmpty && reqId.isEmpty {
+            return "ts:\(timestamp ?? UUID().uuidString)"
+        }
         return "\(msgId)|\(reqId)"
     }
 
