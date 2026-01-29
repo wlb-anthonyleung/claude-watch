@@ -26,23 +26,12 @@ enum Formatters {
         }
     }
 
-    /// Formats a number compactly for table display (e.g., 134.1K, 1.2M).
+    /// Formats a number with comma separators for table display (e.g., 1,234,567).
     static func formatCompactNumber(_ count: Int) -> String {
-        switch count {
-        case 0:
-            return "-"
-        case 1..<1_000:
-            return "\(count)"
-        case 1_000..<1_000_000:
-            let value = Double(count) / 1_000.0
-            return String(format: "%.1fK", value)
-        case 1_000_000..<1_000_000_000:
-            let value = Double(count) / 1_000_000.0
-            return String(format: "%.1fM", value)
-        default:
-            let value = Double(count) / 1_000_000_000.0
-            return String(format: "%.1fB", value)
-        }
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.groupingSeparator = ","
+        return formatter.string(from: NSNumber(value: count)) ?? "\(count)"
     }
 
     static func formatModelName(_ rawName: String) -> String {

@@ -387,8 +387,8 @@ struct OverviewView: View {
 
                 Divider()
 
-                // Table rows
-                ForEach(monthUsage.reversed(), id: \.date) { day in
+                // Table rows (sorted by date ascending)
+                ForEach(monthUsage, id: \.date) { day in
                     Button {
                         selectedItem = .day(day.date)
                     } label: {
@@ -419,7 +419,7 @@ struct OverviewView: View {
                     }
                     .buttonStyle(.plain)
 
-                    if day.date != monthUsage.first?.date {
+                    if day.date != monthUsage.last?.date {
                         Divider()
                     }
                 }
