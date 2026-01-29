@@ -127,6 +127,11 @@ actor ConversationService {
             let dateStr = dateFormatter.string(from: timestamp)
             let model = entry.message?.model ?? "unknown"
 
+            // Skip synthetic model (internal Claude Code operations, not real API calls)
+            if model == "<synthetic>" {
+                continue
+            }
+
             // Initialize daily entry if needed
             if dailyMap[dateStr] == nil {
                 dailyMap[dateStr] = DailyUsageData(
