@@ -335,3 +335,155 @@ To ensure smooth transition:
 4. Test offline mode (no network)
 5. Test with fresh install (no pricing cache)
 6. Test with large history (1000+ JSONL entries)
+
+---
+
+## Phase 5 — Export Functionality
+
+### Overview
+
+Added CSV and XLSX export capabilities to allow users to export their usage data for external analysis or record-keeping.
+
+### New File: `Services/ExportService.swift`
+
+```swift
+enum ExportService {
+    // CSV Export
+    static func exportToCSV(_ data: [DailyUsage]) -> String
+    static func saveCSV(_ data: [DailyUsage]) async -> Bool
+
+    // XLSX Export
+    static func exportToXLSX(_ data: [DailyUsage]) -> Data?
+    static func saveXLSX(_ data: [DailyUsage]) async -> Bool
+}
+```
+
+### Export Format
+
+Both CSV and XLSX exports include the following columns:
+
+- **Date** — yyyy-MM-dd format
+- **Models** — semicolon-separated list of models used (CLI format: `opus-4-5`, `haiku-4-5`)
+- **Input** — input token count
+- **Output** — output token count
+- **Cache Create** — cache creation token count
+- **Cache Read** — cache read token count
+- **Total Tokens** — sum of all token types
+- **Cost (USD)** — total cost for the day
+
+A **Totals row** is appended at the bottom with aggregate values.
+
+### XLSX Generation
+
+The XLSX export creates a valid Office Open XML file without external dependencies:
+
+1. Creates directory structure: `xl/`, `xl/worksheets/`, `_rels/`, `xl/_rels/`
+2. Generates required XML files:
+   - `[Content_Types].xml` — MIME type declarations
+   - `_rels/.rels` — package relationships
+   - `xl/workbook.xml` — workbook definition
+   - `xl/_rels/workbook.xml.rels` — workbook relationships
+   - `xl/worksheets/sheet1.xml` — actual data
+3. Uses system `/usr/bin/zip` to create the final `.xlsx` archive
+
+### UI Changes
+
+**Modified: `Views/Detail/DetailWindowView.swift`**
+
+Added two toolbar buttons before the existing Refresh button:
+
+- **Export CSV** (`doc.text` icon) — saves usage data as CSV
+- **Export Excel** (`tablecells` icon) — saves usage data as XLSX
+
+Both buttons use `NSSavePanel` for file location selection with appropriate file extensions.
+
+### File Changes
+
+| File                                   | Action     | Description                    |
+|----------------------------------------|------------|--------------------------------|
+| `Services/ExportService.swift`         | **NEW**    | CSV and XLSX export service    |
+| `Views/Detail/DetailWindowView.swift`  | **MODIFY** | Add export buttons to toolbar  |
+
+---
+
+## Deduplication Fix
+
+### Issue
+
+Initial implementation showed token counts approximately 2x higher than `ccusage`. Investigation of the ccusage source code revealed the exact deduplication logic:
+
+### ccusage Behavior
+
+1. **Deduplication key**: Uses `messageId:requestId` combination
+2. **Both IDs required**: Only deduplicates when BOTH `message.id` AND `requestId` are present
+3. **No fallback**: Entries missing either ID are NEVER deduplicated (always counted)
+
+### Implementation
+
+```swift
+var dedupeKey: String? {
+    guard let msgId = message?.id, let reqId = requestId else {
+        return nil  // No deduplication if either is missing
+    }
+    return "\(msgId):\(reqId)"
+}
+```
+
+### Synthetic Model Filter
+
+The `<synthetic>` model represents internal Claude Code operations (not actual API calls) and is skipped during aggregation to match ccusage behavior.
+
+---
+
+## Date Boundary Fix
+
+### Problem
+
+First date in the range showed lower token counts than ccusage.
+
+### Root Cause
+
+The `sinceDate` parameter used the current time of day, filtering out entries from earlier that day.
+
+### Fix
+
+Use `startOfDay` to ensure all entries from the first day are captured:
+
+```swift
+let rawDate = Calendar.current.date(
+    byAdding: .day, value: -(AppConstants.rollingFetchDays - 1), to: Date()
+)!
+let sinceDate = Calendar.current.startOfDay(for: rawDate)
+```
+
+---
+
+## Usage Table
+
+Added a detailed usage table to the Overview view that matches the ccusage CLI output format.
+
+### Features
+
+- **Date column**: yyyy-MM-dd format (sorted ascending)
+- **Models column**: CLI-style names with "- " prefix (e.g., "- haiku-4-5")
+- **Token columns**: Full numbers with comma separators (e.g., `1,234,567`)
+- **Cost column**: USD currency format
+- **Totals row**: Aggregate values at the bottom
+- **Clickable rows**: Navigate to day detail view
+
+### Model Name Formatting
+
+Added `Formatters.formatModelNameCLI()` for ccusage-style model names:
+
+```swift
+static func formatModelNameCLI(_ rawName: String) -> String {
+    let mapping: [String: String] = [
+        "claude-opus-4-5-20251101": "opus-4-5",
+        "claude-sonnet-4-5-20250514": "sonnet-4-5",
+        "claude-haiku-4-5-20251001": "haiku-4-5",
+        "claude-sonnet-4-20250514": "sonnet-4",
+        "claude-haiku-3-5-20241022": "haiku-3-5",
+    ]
+    // ... fallback logic
+}
+```
