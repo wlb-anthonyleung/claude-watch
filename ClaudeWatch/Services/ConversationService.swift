@@ -93,10 +93,6 @@ actor ConversationService {
         var seenKeys: Set<String> = []
 
         for fileURL in jsonlFiles {
-            // Skip subagent files - they duplicate parent entries
-            if fileURL.path.contains("/subagents/") {
-                continue
-            }
             await parseFile(fileURL, targetDay: targetDay, into: &hourlyData, seenKeys: &seenKeys)
         }
 
@@ -306,11 +302,6 @@ actor ConversationService {
         isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
 
         for fileURL in files {
-            // Skip subagent files - they duplicate parent entries
-            if fileURL.path.contains("/subagents/") {
-                continue
-            }
-
             guard let data = try? Data(contentsOf: fileURL),
                   let content = String(data: data, encoding: .utf8) else {
                 continue
@@ -343,12 +334,14 @@ actor ConversationService {
                     continue
                 }
 
-                // Deduplicate using messageId + requestId
-                let key = entry.dedupeKey
-                if seenKeys.contains(key) {
-                    continue
+                // Deduplicate using messageId + requestId (only when both are present)
+                if let key = entry.dedupeKey {
+                    if seenKeys.contains(key) {
+                        continue
+                    }
+                    seenKeys.insert(key)
                 }
-                seenKeys.insert(key)
+                // Entries without both IDs are never deduplicated (always counted)
 
                 allEntries.append(entry)
             }
@@ -419,12 +412,14 @@ actor ConversationService {
                 continue
             }
 
-            // Deduplicate using messageId + requestId
-            let key = entry.dedupeKey
-            if seenKeys.contains(key) {
-                continue
+            // Deduplicate using messageId + requestId (only when both are present)
+            if let key = entry.dedupeKey {
+                if seenKeys.contains(key) {
+                    continue
+                }
+                seenKeys.insert(key)
             }
-            seenKeys.insert(key)
+            // Entries without both IDs are never deduplicated (always counted)
 
             let hour = calendar.component(.hour, from: entryDate)
 
@@ -442,19 +437,17 @@ actor ConversationService {
 
 private struct ConversationEntry: Decodable {
     let timestamp: String?
-    let uuid: String?
     let requestId: String?
     let message: MessageContent?
 
-    /// Unique key for deduplication (messageId + requestId + timestamp fallback)
-    var dedupeKey: String {
-        let msgId = message?.id ?? uuid ?? ""
-        let reqId = requestId ?? ""
-        // If both are empty, use timestamp to avoid over-deduplication
-        if msgId.isEmpty && reqId.isEmpty {
-            return "ts:\(timestamp ?? UUID().uuidString)"
+    /// Unique key for deduplication (messageId + requestId).
+    /// Returns nil if either is missing - entries without both IDs are never deduplicated.
+    /// This matches ccusage behavior exactly.
+    var dedupeKey: String? {
+        guard let msgId = message?.id, let reqId = requestId else {
+            return nil
         }
-        return "\(msgId)|\(reqId)"
+        return "\(msgId):\(reqId)"
     }
 }
 
@@ -482,27 +475,24 @@ private struct ParsedEntry: Decodable {
     let timestamp: String?
     let sessionId: String?
     let cwd: String?
-    let uuid: String?
     let requestId: String?
     let message: ParsedMessageContent?
     var parsedTimestamp: Date?
 
-    /// Unique key for deduplication (messageId + requestId + timestamp fallback)
-    var dedupeKey: String {
-        let msgId = message?.id ?? uuid ?? ""
-        let reqId = requestId ?? ""
-        // If both are empty, use timestamp to avoid over-deduplication
-        if msgId.isEmpty && reqId.isEmpty {
-            return "ts:\(timestamp ?? UUID().uuidString)"
+    /// Unique key for deduplication (messageId + requestId).
+    /// Returns nil if either is missing - entries without both IDs are never deduplicated.
+    /// This matches ccusage behavior exactly.
+    var dedupeKey: String? {
+        guard let msgId = message?.id, let reqId = requestId else {
+            return nil
         }
-        return "\(msgId)|\(reqId)"
+        return "\(msgId):\(reqId)"
     }
 
     enum CodingKeys: String, CodingKey {
         case timestamp
         case sessionId
         case cwd
-        case uuid
         case requestId
         case message
     }
