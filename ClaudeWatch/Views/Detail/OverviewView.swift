@@ -381,7 +381,7 @@ struct OverviewView: View {
                     Text("Cost (USD)")
                         .frame(width: 90, alignment: .trailing)
                 }
-                .font(.footnote.weight(.semibold))
+                .font(.callout.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 8)
 
@@ -410,7 +410,7 @@ struct OverviewView: View {
                             Text(Formatters.formatCost(day.totalCost))
                                 .frame(width: 90, alignment: .trailing)
                         }
-                        .font(.footnote.monospacedDigit())
+                        .font(.callout.monospacedDigit())
                         .padding(.vertical, 4)
                         .padding(.horizontal, 8)
                         .background(Color.primary.opacity(0.001)) // For tap area
@@ -443,7 +443,7 @@ struct OverviewView: View {
                         .frame(width: 90, alignment: .trailing)
                         .foregroundStyle(.green)
                 }
-                .font(.footnote.weight(.semibold).monospacedDigit())
+                .font(.callout.weight(.semibold).monospacedDigit())
                 .padding(.vertical, 4)
                 .padding(.horizontal, 8)
             }
