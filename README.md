@@ -54,8 +54,10 @@ Download the latest release from the [Releases](https://github.com/wlb-anthonyle
 - **14-Day Trend** — Line chart with 3-day moving average
 - **Monthly View** — Switch between months to compare usage
 - **Daily Cost Chart** — Stacked or grouped view by model
+- **Usage Table** — Detailed daily breakdown matching ccusage CLI format
 - **Hover for Details** — See exact tokens and cost per model
 - **Click to Drill Down** — Click any day to see detailed breakdown
+- **Export Data** — Export to CSV or Excel (XLSX) format
 
 #### Day Detail View
 
@@ -96,6 +98,7 @@ ClaudeWatch/
 ├── Services/
 │   ├── CCUsageService.swift     # Aggregates data from ConversationService
 │   ├── ConversationService.swift # Parses local JSONL files
+│   ├── ExportService.swift      # CSV and XLSX export
 │   ├── PricingService.swift     # Fetches/caches model pricing
 │   └── PollingService.swift     # Timer-based polling
 ├── Views/
@@ -202,7 +205,6 @@ We welcome contributions! Here's how to get started.
 ### Areas for Contribution
 
 - **New Charts** — Additional visualizations for usage data
-- **Export** — CSV/JSON export of usage history
 - **Notifications** — Alerts when spending exceeds thresholds
 - **Widgets** — macOS widgets for quick stats
 - **Localization** — Translations for other languages
