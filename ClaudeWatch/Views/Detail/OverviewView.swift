@@ -393,7 +393,7 @@ struct OverviewView: View {
                         selectedItem = .day(day.date)
                     } label: {
                         HStack(spacing: 0) {
-                            Text(Formatters.ddmmDateLabel(day.date))
+                            Text(day.date)
                                 .frame(width: 90, alignment: .leading)
                             Text(modelsString(for: day))
                                 .frame(width: 120, alignment: .leading)
