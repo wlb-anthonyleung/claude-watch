@@ -44,6 +44,7 @@ struct ClaudeWatchApp: App {
 
         Settings {
             SettingsView(pollingService: pollingService)
+                .modelContainer(modelContainer)
         }
     }
 }
