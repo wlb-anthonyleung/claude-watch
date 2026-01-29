@@ -85,14 +85,19 @@ actor ConversationService {
         // Find all JSONL files
         let jsonlFiles = findJSONLFiles()
 
-        // Aggregate tokens by hour
+        // Aggregate tokens by hour with deduplication
         var hourlyData: [Int: (input: Int, output: Int, cacheCreate: Int, cacheRead: Int)] = [:]
         for hour in 0..<24 {
             hourlyData[hour] = (0, 0, 0, 0)
         }
+        var seenKeys: Set<String> = []
 
         for fileURL in jsonlFiles {
-            await parseFile(fileURL, targetDay: targetDay, into: &hourlyData)
+            // Skip subagent files - they duplicate parent entries
+            if fileURL.path.contains("/subagents/") {
+                continue
+            }
+            await parseFile(fileURL, targetDay: targetDay, into: &hourlyData, seenKeys: &seenKeys)
         }
 
         return hourlyData.map { hour, data in
@@ -114,7 +119,6 @@ actor ConversationService {
         let entries = await parseAllEntries(from: jsonlFiles, since: since)
 
         // Group by date
-        let calendar = Calendar.current
         var dailyMap: [String: DailyUsageData] = [:]
         var modelMap: [String: [String: ModelBreakdownData]] = [:] // date -> model -> breakdown
 
@@ -297,10 +301,16 @@ actor ConversationService {
 
     private func parseAllEntries(from files: [URL], since: Date) async -> [ParsedEntry] {
         var allEntries: [ParsedEntry] = []
+        var seenKeys: Set<String> = []
         let isoFormatter = ISO8601DateFormatter()
         isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
 
         for fileURL in files {
+            // Skip subagent files - they duplicate parent entries
+            if fileURL.path.contains("/subagents/") {
+                continue
+            }
+
             guard let data = try? Data(contentsOf: fileURL),
                   let content = String(data: data, encoding: .utf8) else {
                 continue
@@ -322,14 +332,25 @@ actor ConversationService {
                 }
 
                 // Parse timestamp
-                if let parsedDate = isoFormatter.date(from: timestamp) {
-                    entry.parsedTimestamp = parsedDate
-
-                    // Filter by date
-                    if parsedDate >= since {
-                        allEntries.append(entry)
-                    }
+                guard let parsedDate = isoFormatter.date(from: timestamp) else {
+                    continue
                 }
+
+                entry.parsedTimestamp = parsedDate
+
+                // Filter by date
+                guard parsedDate >= since else {
+                    continue
+                }
+
+                // Deduplicate using messageId + requestId
+                let key = entry.dedupeKey
+                if seenKeys.contains(key) {
+                    continue
+                }
+                seenKeys.insert(key)
+
+                allEntries.append(entry)
             }
         }
 
@@ -360,7 +381,8 @@ actor ConversationService {
     private func parseFile(
         _ fileURL: URL,
         targetDay: Date,
-        into hourlyData: inout [Int: (input: Int, output: Int, cacheCreate: Int, cacheRead: Int)]
+        into hourlyData: inout [Int: (input: Int, output: Int, cacheCreate: Int, cacheRead: Int)],
+        seenKeys: inout Set<String>
     ) async {
         let calendar = Calendar.current
 
@@ -372,6 +394,8 @@ actor ConversationService {
         let lines = content.components(separatedBy: .newlines)
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
 
         for line in lines where !line.isEmpty {
             guard let lineData = line.data(using: .utf8),
@@ -386,8 +410,6 @@ actor ConversationService {
             }
 
             // Parse timestamp
-            let isoFormatter = ISO8601DateFormatter()
-            isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
             guard let entryDate = isoFormatter.date(from: timestamp) else {
                 continue
             }
@@ -396,6 +418,13 @@ actor ConversationService {
             guard calendar.isDate(entryDate, inSameDayAs: targetDay) else {
                 continue
             }
+
+            // Deduplicate using messageId + requestId
+            let key = entry.dedupeKey
+            if seenKeys.contains(key) {
+                continue
+            }
+            seenKeys.insert(key)
 
             let hour = calendar.component(.hour, from: entryDate)
 
@@ -413,10 +442,20 @@ actor ConversationService {
 
 private struct ConversationEntry: Decodable {
     let timestamp: String?
+    let uuid: String?
+    let requestId: String?
     let message: MessageContent?
+
+    /// Unique key for deduplication (messageId + requestId)
+    var dedupeKey: String {
+        let msgId = message?.id ?? uuid ?? ""
+        let reqId = requestId ?? ""
+        return "\(msgId)|\(reqId)"
+    }
 }
 
 private struct MessageContent: Decodable {
+    let id: String?
     let usage: UsageInfo?
 }
 
@@ -439,18 +478,30 @@ private struct ParsedEntry: Decodable {
     let timestamp: String?
     let sessionId: String?
     let cwd: String?
+    let uuid: String?
+    let requestId: String?
     let message: ParsedMessageContent?
     var parsedTimestamp: Date?
+
+    /// Unique key for deduplication (messageId + requestId)
+    var dedupeKey: String {
+        let msgId = message?.id ?? uuid ?? ""
+        let reqId = requestId ?? ""
+        return "\(msgId)|\(reqId)"
+    }
 
     enum CodingKeys: String, CodingKey {
         case timestamp
         case sessionId
         case cwd
+        case uuid
+        case requestId
         case message
     }
 }
 
 private struct ParsedMessageContent: Decodable {
+    let id: String?
     let model: String?
     let usage: UsageInfo?
 }
