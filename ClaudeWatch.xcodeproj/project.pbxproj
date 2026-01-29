@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		0374FA160258D0AE98C9DA25 /* SessionUsage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D5AEE6F82170E69692B4538 /* SessionUsage.swift */; };
+		A1B2C3D4E5F60718192A3B4C /* ExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5C6D7E8F9012345678901AB /* ExportService.swift */; };
 		13829431FC3B66C7574B6F53 /* TokenCategoryChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = B01FDB5EA9DCAD6A20EC28D5 /* TokenCategoryChart.swift */; };
 		17DE92FCB159E6FBFC0F3436 /* ModelBreakdown.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BEC83921D807C7C77B07BDF /* ModelBreakdown.swift */; };
 		231CA0F496D1A6988DB2B9BD /* ClaudeWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CFA51CBF240F016F005EF71 /* ClaudeWatchApp.swift */; };
@@ -29,18 +30,21 @@
 		D7177BF1A13313508120243F /* Constants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12272517218663DC3ED709CD /* Constants.swift */; };
 		DF9B860AB1F874750FA742E8 /* HourlyBreakdownChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91D707A971141C1799A238AC /* HourlyBreakdownChart.swift */; };
 		E2F7634A0C8635E16A06E0AE /* CCUsageResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE658D3EF50C6E1D379C0459 /* CCUsageResponse.swift */; };
+		E9A2CB3248AE18AEB2B92D72 /* PricingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DB7285CD4BDDE6EE47D19DF /* PricingService.swift */; };
 		F50EE99AF47C38691937BBE1 /* DayPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90D7529E3B3B2AF98A4AA2E0 /* DayPickerView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		0D4346E5248A8B4D5033F48B /* CCUsageService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCUsageService.swift; sourceTree = "<group>"; };
 		0D5AEE6F82170E69692B4538 /* SessionUsage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionUsage.swift; sourceTree = "<group>"; };
+		B5C6D7E8F9012345678901AB /* ExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportService.swift; sourceTree = "<group>"; };
 		12272517218663DC3ED709CD /* Constants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Constants.swift; sourceTree = "<group>"; };
 		2B831D2BFB4BE9A940187EF9 /* ClaudeWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ClaudeWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		2E6921CEFD0ACAE3933223B9 /* DayDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayDetailView.swift; sourceTree = "<group>"; };
 		4865B7584B42A912032200DA /* DetailWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailWindowView.swift; sourceTree = "<group>"; };
 		4BEC83921D807C7C77B07BDF /* ModelBreakdown.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelBreakdown.swift; sourceTree = "<group>"; };
 		5A203B735E55C3F9998A99D1 /* ConversationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationService.swift; sourceTree = "<group>"; };
+		6DB7285CD4BDDE6EE47D19DF /* PricingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PricingService.swift; sourceTree = "<group>"; };
 		75D1D27CF7DB33D51BC8DF26 /* OverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverviewView.swift; sourceTree = "<group>"; };
 		90D7529E3B3B2AF98A4AA2E0 /* DayPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayPickerView.swift; sourceTree = "<group>"; };
 		91D707A971141C1799A238AC /* HourlyBreakdownChart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HourlyBreakdownChart.swift; sourceTree = "<group>"; };
@@ -66,7 +70,9 @@
 			children = (
 				0D4346E5248A8B4D5033F48B /* CCUsageService.swift */,
 				5A203B735E55C3F9998A99D1 /* ConversationService.swift */,
+				B5C6D7E8F9012345678901AB /* ExportService.swift */,
 				FEAC8D2E08AB8AF6DA2C932A /* PollingService.swift */,
+				6DB7285CD4BDDE6EE47D19DF /* PricingService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -234,6 +240,7 @@
 				231CA0F496D1A6988DB2B9BD /* ClaudeWatchApp.swift in Sources */,
 				D7177BF1A13313508120243F /* Constants.swift in Sources */,
 				D6240AE826993DE2344068EF /* ConversationService.swift in Sources */,
+				A1B2C3D4E5F60718192A3B4C /* ExportService.swift in Sources */,
 				4AAFC931663ABEB76EBA65AB /* CostHistoryChart.swift in Sources */,
 				67DD38ACECE78C64D45F1911 /* DailySummaryCard.swift in Sources */,
 				D61565E22408199A6BC2DA2A /* DailyUsage.swift in Sources */,
@@ -247,6 +254,7 @@
 				83E38954D3F524E19AE2A078 /* ModelBreakdownChart.swift in Sources */,
 				96061C5E7E04F06A5E5FFE76 /* OverviewView.swift in Sources */,
 				86A6E69FAA5AF917B70E0ABB /* PollingService.swift in Sources */,
+				E9A2CB3248AE18AEB2B92D72 /* PricingService.swift in Sources */,
 				87DF1D6F195E4D0E31478FAB /* SessionBreakdownView.swift in Sources */,
 				0374FA160258D0AE98C9DA25 /* SessionUsage.swift in Sources */,
 				8CC6F3FD0A110202E202B3CC /* SettingsView.swift in Sources */,

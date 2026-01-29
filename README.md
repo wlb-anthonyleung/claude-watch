@@ -4,7 +4,7 @@
 
 Claude Watch is a native macOS menu bar app that gives you instant visibility into your **Claude Code** usage. Whether you're on a Max subscription or pay-as-you-go, Claude Watch keeps you informed with real-time cost tracking, usage trends, and detailed breakdowns—all accessible with a single click from your menu bar.
 
-> **Note**: Claude Watch tracks usage from [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (the CLI tool) only. It reads local conversation logs from `~/.claude/` — no network connection required. Usage from claude.ai or the Claude desktop app is not tracked.
+> **Note**: Claude Watch tracks usage from [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (the CLI tool) only. It reads local conversation logs from `~/.claude/` — no external dependencies required. Usage from claude.ai or the Claude desktop app is not tracked.
 
 ## Why Claude Watch?
 
@@ -14,6 +14,7 @@ Claude Watch is a native macOS menu bar app that gives you instant visibility in
 - **Compare to Yesterday** — Know immediately if you're spending more or less than usual
 - **Works Offline** — Data is cached locally, so you can review history anytime
 - **Privacy First** — All data stays on your Mac. No accounts, no cloud sync, no tracking
+- **Zero Dependencies** — No Node.js, npm, or external CLI tools required
 
 ---
 
@@ -24,13 +25,9 @@ Claude Watch is a native macOS menu bar app that gives you instant visibility in
 #### Requirements
 
 - macOS 15 (Sequoia) or later
-- [ccusage](https://github.com/ryoppippi/ccusage) installed via npm
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed and used at least once
 
-#### Install ccusage first
-
-```bash
-npm install -g ccusage
-```
+That's it! No additional dependencies needed.
 
 #### Install Claude Watch
 
@@ -41,7 +38,7 @@ Download the latest release from the [Releases](https://github.com/wlb-anthonyle
 1. **Launch Claude Watch** — The app runs in your menu bar (no Dock icon)
 2. **Click the chart icon** — Opens a popover with today's summary
 3. **View Details** — Click "Details" to open the full analytics window
-4. **Configure** — Adjust polling interval and npx path in Settings
+4. **Configure** — Adjust polling interval in Settings
 
 ### Features
 
@@ -57,8 +54,10 @@ Download the latest release from the [Releases](https://github.com/wlb-anthonyle
 - **14-Day Trend** — Line chart with 3-day moving average
 - **Monthly View** — Switch between months to compare usage
 - **Daily Cost Chart** — Stacked or grouped view by model
+- **Usage Table** — Detailed daily breakdown matching ccusage CLI format
 - **Hover for Details** — See exact tokens and cost per model
 - **Click to Drill Down** — Click any day to see detailed breakdown
+- **Export Data** — Export to CSV or Excel (XLSX) format
 
 #### Day Detail View
 
@@ -70,10 +69,9 @@ Download the latest release from the [Releases](https://github.com/wlb-anthonyle
 
 ### Settings
 
-| Setting          | Description                   | Default                 |
-|------------------|-------------------------------|-------------------------|
-| Polling Interval | How often to fetch fresh data | 5 minutes               |
-| npx Path         | Path to npx executable        | `/opt/homebrew/bin/npx` |
+| Setting          | Description                   | Default   |
+|------------------|-------------------------------|-----------|
+| Polling Interval | How often to fetch fresh data | 5 minutes |
 
 ---
 
@@ -96,11 +94,13 @@ ClaudeWatch/
 │   ├── DailyUsage.swift         # Daily aggregate data
 │   ├── ModelUsage.swift         # Per-model breakdown
 │   ├── SessionUsage.swift       # Per-session breakdown (cached)
-│   └── CCUsageResponse.swift    # JSON parsing structs
+│   └── CCUsageResponse.swift    # Internal data transfer structs
 ├── Services/
-│   ├── CCUsageService.swift     # Shells out to npx ccusage
-│   ├── PollingService.swift     # Timer-based polling
-│   └── ConversationService.swift # Parses local JSONL files
+│   ├── CCUsageService.swift     # Aggregates data from ConversationService
+│   ├── ConversationService.swift # Parses local JSONL files
+│   ├── ExportService.swift      # CSV and XLSX export
+│   ├── PricingService.swift     # Fetches/caches model pricing
+│   └── PollingService.swift     # Timer-based polling
 ├── Views/
 │   ├── MenuBar/                 # Menu bar popover
 │   ├── Detail/                  # Main window views
@@ -143,16 +143,19 @@ xcodegen generate
 
 #### Data Flow
 
-1. **PollingService** calls `npx ccusage --json` on a timer
-2. **CCUsageService** parses JSON and returns typed structs
-3. **PollingService** upserts data into SwiftData
-4. **Views** query SwiftData and display charts
+1. **PollingService** triggers data refresh on a timer
+2. **ConversationService** parses JSONL files from `~/.claude/`
+3. **PricingService** calculates costs using LiteLLM pricing data
+4. **CCUsageService** aggregates and formats the data
+5. **PollingService** upserts data into SwiftData
+6. **Views** query SwiftData and display charts
 
 #### Caching Strategy
 
 - **Daily data**: Fetched via polling, stored in `DailyUsage`
 - **Session data**: Fetched on-demand, cached in `SessionUsage` for past days
-- **Hourly data**: Parsed from local `~/.claude` JSONL files (no npx call)
+- **Hourly data**: Parsed from local `~/.claude` JSONL files
+- **Pricing data**: Cached locally, refreshed daily from LiteLLM
 
 #### Menu Bar App Lifecycle
 
@@ -202,7 +205,6 @@ We welcome contributions! Here's how to get started.
 ### Areas for Contribution
 
 - **New Charts** — Additional visualizations for usage data
-- **Export** — CSV/JSON export of usage history
 - **Notifications** — Alerts when spending exceeds thresholds
 - **Widgets** — macOS widgets for quick stats
 - **Localization** — Translations for other languages
@@ -226,7 +228,7 @@ Claude Watch respects your privacy:
 - **No accounts required** — Just install and use
 - **No cloud sync** — All data stored locally in SwiftData
 - **No analytics** — We don't track anything
-- **No network calls** — All data comes from local `~/.claude/` files (Claude Code's conversation logs)
+- **Minimal network** — Only fetches pricing data from LiteLLM (public, no auth)
 - **Open source** — Audit the code yourself
 
 ---
@@ -239,7 +241,7 @@ MIT License. See [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
-- [ccusage](https://github.com/ryoppippi/ccusage) — The CLI tool that makes this possible
+- [LiteLLM](https://github.com/BerriAI/litellm) — For maintaining public model pricing data
 - [Anthropic](https://anthropic.com) — For building Claude
 
 ---

@@ -13,8 +13,7 @@ struct ClaudeWatchApp: App {
         )
         self.modelContainer = container
 
-        let npxPath = UserDefaults.standard.string(forKey: "npxPath") ?? AppConstants.defaultNpxPath
-        let ccService = CCUsageService(npxPath: npxPath)
+        let ccService = CCUsageService()
         self.ccUsageService = ccService
 
         let polling = PollingService(
@@ -45,6 +44,7 @@ struct ClaudeWatchApp: App {
 
         Settings {
             SettingsView(pollingService: pollingService)
+                .modelContainer(modelContainer)
         }
     }
 }
