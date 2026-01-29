@@ -2,7 +2,9 @@
 
 **Your Claude usage, always visible. Never wonder about costs again.**
 
-Claude Watch is a native macOS menu bar app that gives you instant visibility into your Claude API usage. Whether you're on a Max subscription or pay-as-you-go, Claude Watch keeps you informed with real-time cost tracking, usage trends, and detailed breakdowns—all accessible with a single click from your menu bar.
+Claude Watch is a native macOS menu bar app that gives you instant visibility into your **Claude Code** usage. Whether you're on a Max subscription or pay-as-you-go, Claude Watch keeps you informed with real-time cost tracking, usage trends, and detailed breakdowns—all accessible with a single click from your menu bar.
+
+> **Note**: Claude Watch tracks usage from [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (the CLI tool) only. It reads local conversation logs from `~/.claude/` — no network connection required. Usage from claude.ai or the Claude desktop app is not tracked.
 
 ## Why Claude Watch?
 
@@ -224,7 +226,7 @@ Claude Watch respects your privacy:
 - **No accounts required** — Just install and use
 - **No cloud sync** — All data stored locally in SwiftData
 - **No analytics** — We don't track anything
-- **No network calls** — Except to run `npx ccusage` (which reads local files)
+- **No network calls** — All data comes from local `~/.claude/` files (Claude Code's conversation logs)
 - **Open source** — Audit the code yourself
 
 ---
