@@ -33,7 +33,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 400, height: 220)
+        .frame(width: 400, height: 280)
         .onChange(of: pollingInterval) { _, newValue in
             pollingService.updateInterval(newValue)
         }

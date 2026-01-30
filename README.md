@@ -208,7 +208,6 @@ We welcome contributions! Here's how to get started.
 - **Notifications** — Alerts when spending exceeds thresholds
 - **Widgets** — macOS widgets for quick stats
 - **Localization** — Translations for other languages
-- **App Icon** — Custom app icon design
 
 ### Reporting Issues
 

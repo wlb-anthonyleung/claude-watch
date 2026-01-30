@@ -5,6 +5,8 @@ struct MenuBarPopoverView: View {
     let pollingService: PollingService
     @Query(sort: \DailyUsage.date, order: .reverse) private var allUsage: [DailyUsage]
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
+    @Environment(\.dismiss) private var dismiss
 
     private var todayUsage: DailyUsage? {
         let today = Formatters.todayDateString()
@@ -142,6 +144,7 @@ struct MenuBarPopoverView: View {
                 .disabled(pollingService.isPolling)
 
                 Button {
+                    dismiss()
                     NSApp.activate(ignoringOtherApps: true)
                     openWindow(id: AppConstants.detailWindowID)
                 } label: {
@@ -152,7 +155,11 @@ struct MenuBarPopoverView: View {
             .buttonStyle(.bordered)
 
             HStack(spacing: 8) {
-                SettingsLink {
+                Button {
+                    dismiss()
+                    NSApp.activate(ignoringOtherApps: true)
+                    openSettings()
+                } label: {
                     Label("Settings", systemImage: "gear")
                         .frame(maxWidth: .infinity)
                 }
