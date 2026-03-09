@@ -114,7 +114,8 @@ ClaudeWatch/
 
 #### Prerequisites
 
-- Xcode 16 or later
+- macOS 15 (Sequoia) or later
+- Xcode 16 or later (install from the Mac App Store)
 - [xcodegen](https://github.com/yonaskolb/XcodeGen) (optional, for regenerating project)
 
 #### Build Steps
@@ -138,6 +139,55 @@ If you modify `project.yml`:
 ```bash
 xcodegen generate
 ```
+
+### Claude Code: Auto Setup & Run (Fresh Machine)
+
+If you are Claude Code running on a fresh macOS machine with Xcode installed from the Mac App Store, follow these steps to build and launch the app automatically. Each step may require user approval for `sudo` commands.
+
+#### Step 1: Select Xcode as the active developer toolchain
+
+The default developer directory points to Command Line Tools, which lacks the full SDK needed for SwiftUI app builds.
+
+```bash
+sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+```
+
+#### Step 2: Accept the Xcode license
+
+```bash
+sudo xcodebuild -license accept
+```
+
+#### Step 3: Install Xcode first-launch components
+
+Xcode requires a one-time install of system components (CoreSimulator, etc.) before it can build projects.
+
+```bash
+xcodebuild -runFirstLaunch
+```
+
+#### Step 4: Build the project
+
+```bash
+xcodebuild -scheme ClaudeWatch -configuration Debug build
+```
+
+#### Step 5: Launch the app
+
+The built app is located in Xcode's DerivedData directory. Find and open it:
+
+```bash
+open "$(xcodebuild -scheme ClaudeWatch -configuration Debug -showBuildSettings 2>/dev/null | grep -m1 'BUILT_PRODUCTS_DIR' | awk '{print $3}')/Claude Watch.app"
+```
+
+#### Troubleshooting
+
+| Problem                                       | Solution                                                              |
+|-----------------------------------------------|-----------------------------------------------------------------------|
+| `xcodebuild` says "requires Xcode"            | Run Step 1 (`xcode-select`)                                          |
+| "Failed to load plugin" / CoreSimulator error  | Run Step 3 (`-runFirstLaunch`)                                        |
+| Gatekeeper warning on another machine          | Right-click the app → Open, or build from source locally              |
+| `sudo` not available                           | Steps 1-2 require user approval; prompt the user to run them manually |
 
 ### Architecture Highlights
 
