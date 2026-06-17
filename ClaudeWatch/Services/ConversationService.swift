@@ -188,7 +188,8 @@ actor ConversationService {
                         inputTokens: totals.inputTokens,
                         outputTokens: totals.outputTokens,
                         cacheCreationTokens: totals.cacheCreationTokens,
-                        cacheReadTokens: totals.cacheReadTokens
+                        cacheReadTokens: totals.cacheReadTokens,
+                        cacheCreation1hTokens: totals.cacheCreation1hTokens
                     )
                 )
                 list.append(ModelAggregate(
@@ -196,6 +197,7 @@ actor ConversationService {
                     inputTokens: totals.inputTokens,
                     outputTokens: totals.outputTokens,
                     cacheCreationTokens: totals.cacheCreationTokens,
+                    cacheCreation1hTokens: totals.cacheCreation1hTokens,
                     cacheReadTokens: totals.cacheReadTokens,
                     cost: cost
                 ))
@@ -272,6 +274,7 @@ actor ConversationService {
             totals.inputTokens += usage.inputTokens ?? 0
             totals.outputTokens += usage.outputTokens ?? 0
             totals.cacheCreationTokens += usage.cacheCreationInputTokens ?? 0
+            totals.cacheCreation1hTokens += usage.cacheCreation1hTokens
             totals.cacheReadTokens += usage.cacheReadInputTokens ?? 0
             models[model] = totals
             dayTotals[day] = models
@@ -572,12 +575,27 @@ private struct UsageInfo: Decodable {
     let outputTokens: Int?
     let cacheCreationInputTokens: Int?
     let cacheReadInputTokens: Int?
+    let cacheCreation: CacheCreationBreakdown?
+
+    /// Cache-creation tokens written with a 1-hour TTL — billed higher than 5-minute writes.
+    var cacheCreation1hTokens: Int {
+        cacheCreation?.ephemeral1hInputTokens ?? 0
+    }
 
     enum CodingKeys: String, CodingKey {
         case inputTokens = "input_tokens"
         case outputTokens = "output_tokens"
         case cacheCreationInputTokens = "cache_creation_input_tokens"
         case cacheReadInputTokens = "cache_read_input_tokens"
+        case cacheCreation = "cache_creation"
+    }
+}
+
+private struct CacheCreationBreakdown: Decodable {
+    let ephemeral1hInputTokens: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case ephemeral1hInputTokens = "ephemeral_1h_input_tokens"
     }
 }
 

@@ -106,6 +106,7 @@ final class PollingService {
                     inputTokens: mb.inputTokens,
                     outputTokens: mb.outputTokens,
                     cacheCreationTokens: mb.cacheCreationTokens,
+                    cacheCreation1hTokens: mb.cacheCreation1hTokens,
                     cacheReadTokens: mb.cacheReadTokens
                 )
             }
@@ -201,7 +202,8 @@ final class PollingService {
                     outputTokens: m.outputTokens,
                     cacheCreationTokens: m.cacheCreationTokens,
                     cacheReadTokens: m.cacheReadTokens,
-                    cost: m.cost
+                    cost: m.cost,
+                    cacheCreation1hTokens: m.cacheCreation1hTokens
                 ))
                 input += m.inputTokens
                 output += m.outputTokens

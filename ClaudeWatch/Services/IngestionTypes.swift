@@ -16,6 +16,8 @@ struct ModelTokenTotals: Sendable {
     var inputTokens = 0
     var outputTokens = 0
     var cacheCreationTokens = 0
+    /// Subset of `cacheCreationTokens` written with a 1-hour TTL (billed at a higher rate).
+    var cacheCreation1hTokens = 0
     var cacheReadTokens = 0
 }
 
@@ -25,6 +27,8 @@ struct ModelAggregate: Sendable {
     var inputTokens: Int
     var outputTokens: Int
     var cacheCreationTokens: Int
+    /// Subset of `cacheCreationTokens` written with a 1-hour TTL.
+    var cacheCreation1hTokens: Int
     var cacheReadTokens: Int
     var cost: Double
 

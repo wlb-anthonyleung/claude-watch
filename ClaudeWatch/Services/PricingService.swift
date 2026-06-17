@@ -76,9 +76,12 @@ actor PricingService {
         // Output tokens
         cost += Double(usage.outputTokens) * pricing.outputCostPerToken
 
-        // Cache creation tokens
+        // Cache creation tokens: 1-hour TTL writes bill higher than 5-minute ones.
         if let cacheCreateCost = pricing.cacheCreationCostPerToken {
-            cost += Double(usage.cacheCreationTokens) * cacheCreateCost
+            let oneHour = min(usage.cacheCreation1hTokens, usage.cacheCreationTokens)
+            let fiveMin = usage.cacheCreationTokens - oneHour
+            let oneHourRate = pricing.cacheCreationCostPerToken1h ?? cacheCreateCost
+            cost += Double(fiveMin) * cacheCreateCost + Double(oneHour) * oneHourRate
         }
 
         // Cache read tokens
@@ -94,11 +97,16 @@ actor PricingService {
         let inputRate = 3e-6
         let outputRate = 15e-6
         let cacheCreateRate = 3.75e-6
+        let cacheCreate1hRate = 6e-6
         let cacheReadRate = 0.3e-6
+
+        let oneHour = min(usage.cacheCreation1hTokens, usage.cacheCreationTokens)
+        let fiveMin = usage.cacheCreationTokens - oneHour
 
         return Double(usage.inputTokens) * inputRate
             + Double(usage.outputTokens) * outputRate
-            + Double(usage.cacheCreationTokens) * cacheCreateRate
+            + Double(fiveMin) * cacheCreateRate
+            + Double(oneHour) * cacheCreate1hRate
             + Double(usage.cacheReadTokens) * cacheReadRate
     }
 
@@ -194,6 +202,7 @@ actor PricingService {
                 inputCostPerToken: inputCost,
                 outputCostPerToken: outputCost,
                 cacheCreationCostPerToken: modelData["cache_creation_input_token_cost"] as? Double,
+                cacheCreationCostPerToken1h: modelData["cache_creation_input_token_cost_above_1hr"] as? Double,
                 cacheReadCostPerToken: modelData["cache_read_input_token_cost"] as? Double,
                 inputCostAbove200k: modelData["input_cost_per_token_above_200k_tokens"] as? Double,
                 outputCostAbove200k: modelData["output_cost_per_token_above_200k_tokens"] as? Double
@@ -238,6 +247,7 @@ actor PricingService {
                 inputCostPerToken: 3e-6,
                 outputCostPerToken: 15e-6,
                 cacheCreationCostPerToken: 3.75e-6,
+                cacheCreationCostPerToken1h: 6e-6,
                 cacheReadCostPerToken: 0.3e-6,
                 inputCostAbove200k: 6e-6,
                 outputCostAbove200k: 30e-6
@@ -246,6 +256,7 @@ actor PricingService {
                 inputCostPerToken: 5e-6,
                 outputCostPerToken: 25e-6,
                 cacheCreationCostPerToken: 6.25e-6,
+                cacheCreationCostPerToken1h: 1e-5,
                 cacheReadCostPerToken: 0.5e-6,
                 inputCostAbove200k: nil,
                 outputCostAbove200k: nil
@@ -254,6 +265,7 @@ actor PricingService {
                 inputCostPerToken: 3e-6,
                 outputCostPerToken: 15e-6,
                 cacheCreationCostPerToken: 3.75e-6,
+                cacheCreationCostPerToken1h: 6e-6,
                 cacheReadCostPerToken: 0.3e-6,
                 inputCostAbove200k: nil,
                 outputCostAbove200k: nil
@@ -276,6 +288,8 @@ struct ModelPricing: Codable {
     let inputCostPerToken: Double
     let outputCostPerToken: Double
     let cacheCreationCostPerToken: Double?
+    /// Rate for cache-creation tokens written with a 1-hour TTL (higher than the 5-minute rate).
+    let cacheCreationCostPerToken1h: Double?
     let cacheReadCostPerToken: Double?
     let inputCostAbove200k: Double?
     let outputCostAbove200k: Double?
@@ -286,6 +300,9 @@ struct TokenUsage {
     let outputTokens: Int
     let cacheCreationTokens: Int
     let cacheReadTokens: Int
+    /// Subset of `cacheCreationTokens` written with a 1-hour TTL. Defaults to 0 so callers that
+    /// don't distinguish cache TTL (e.g. the session path) keep the 5-minute base rate.
+    var cacheCreation1hTokens: Int = 0
 
     var totalTokens: Int {
         inputTokens + outputTokens + cacheCreationTokens + cacheReadTokens
