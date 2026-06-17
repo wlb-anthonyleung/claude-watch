@@ -65,18 +65,39 @@ enum ExportService {
         panel.title = "Export Usage Data"
         panel.message = "Choose a location to save the CSV file"
 
-        let response = await panel.beginSheetModal(for: NSApp.keyWindow ?? NSApp.mainWindow!)
+        let response = await present(panel)
+        guard response == .OK, let url = panel.url else { return false } // cancelled
 
-        if response == .OK, let url = panel.url {
-            do {
-                try csv.write(to: url, atomically: true, encoding: .utf8)
-                return true
-            } catch {
-                print("Failed to save CSV: \(error)")
-                return false
-            }
+        do {
+            try csv.write(to: url, atomically: true, encoding: .utf8)
+            return true
+        } catch {
+            showError("Could not write the CSV file: \(error.localizedDescription)")
+            return false
         }
-        return false
+    }
+
+    // MARK: - Save Panel Helpers
+
+    /// Presents a save panel as a sheet on the active window, falling back to a modal panel when
+    /// no window exists (this is a menu-bar agent, so a key/main window is not guaranteed).
+    @MainActor
+    private static func present(_ panel: NSSavePanel) async -> NSApplication.ModalResponse {
+        if let window = NSApp.keyWindow ?? NSApp.mainWindow {
+            return await panel.beginSheetModal(for: window)
+        }
+        return panel.runModal()
+    }
+
+    /// Surfaces an export failure to the user instead of failing silently.
+    @MainActor
+    private static func showError(_ message: String) {
+        let alert = NSAlert()
+        alert.messageText = "Export Failed"
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     // MARK: - XLSX Export
@@ -135,27 +156,28 @@ enum ExportService {
     @MainActor
     static func saveXLSX(_ data: [DailyUsage]) async -> Bool {
         guard let xlsxData = exportToXLSX(data) else {
+            showError("Could not generate the Excel file.")
             return false
         }
 
         let panel = NSSavePanel()
-        panel.allowedContentTypes = [.init(filenameExtension: "xlsx")!]
+        if let xlsxType = UTType(filenameExtension: "xlsx") {
+            panel.allowedContentTypes = [xlsxType]
+        }
         panel.nameFieldStringValue = "claude-usage-\(Formatters.todayDateString()).xlsx"
         panel.title = "Export Usage Data"
         panel.message = "Choose a location to save the Excel file"
 
-        let response = await panel.beginSheetModal(for: NSApp.keyWindow ?? NSApp.mainWindow!)
+        let response = await present(panel)
+        guard response == .OK, let url = panel.url else { return false } // cancelled
 
-        if response == .OK, let url = panel.url {
-            do {
-                try xlsxData.write(to: url)
-                return true
-            } catch {
-                print("Failed to save XLSX: \(error)")
-                return false
-            }
+        do {
+            try xlsxData.write(to: url)
+            return true
+        } catch {
+            showError("Could not write the Excel file: \(error.localizedDescription)")
+            return false
         }
-        return false
     }
 
     // MARK: - XLSX Generation
@@ -301,16 +323,6 @@ enum ExportService {
 
     /// Creates a ZIP archive from a directory.
     private static func createZipArchive(from sourceDir: URL, to destinationURL: URL, excluding: [String]) -> Bool {
-        let fileManager = FileManager.default
-
-        guard let enumerator = fileManager.enumerator(
-            at: sourceDir,
-            includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey],
-            options: [.skipsHiddenFiles]
-        ) else {
-            return false
-        }
-
         // Use Process to run zip command (available on macOS)
         let process = Process()
         process.currentDirectoryURL = sourceDir
