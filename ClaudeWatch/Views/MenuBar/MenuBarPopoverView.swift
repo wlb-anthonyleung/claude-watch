@@ -59,6 +59,11 @@ struct MenuBarPopoverView: View {
 
             Divider()
             actionButtons
+
+            Text(AppBuildInfo.label)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, alignment: .center)
         }
         .padding()
         .frame(width: 280)
