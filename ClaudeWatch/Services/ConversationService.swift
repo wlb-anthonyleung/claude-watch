@@ -336,30 +336,39 @@ actor ConversationService {
                 modelsUsed: []
             )
 
-            // Aggregate tokens and models
+            // Aggregate tokens per model within the session (skip synthetic internal ops).
+            var perModel: [String: ModelTokenTotals] = [:]
             for entry in sorted {
+                let model = entry.message?.model ?? "unknown"
+                if model == "<synthetic>" { continue }
                 let usage = entry.message?.usage
-                session.inputTokens += usage?.inputTokens ?? 0
-                session.outputTokens += usage?.outputTokens ?? 0
-                session.cacheCreationTokens += usage?.cacheCreationInputTokens ?? 0
-                session.cacheReadTokens += usage?.cacheReadInputTokens ?? 0
-
-                if let model = entry.message?.model {
-                    session.modelsUsed.insert(model)
-                }
+                var totals = perModel[model] ?? ModelTokenTotals()
+                totals.inputTokens += usage?.inputTokens ?? 0
+                totals.outputTokens += usage?.outputTokens ?? 0
+                totals.cacheCreationTokens += usage?.cacheCreationInputTokens ?? 0
+                totals.cacheCreation1hTokens += usage?.cacheCreation1hTokens ?? 0
+                totals.cacheReadTokens += usage?.cacheReadInputTokens ?? 0
+                perModel[model] = totals
+                session.modelsUsed.insert(model)
             }
 
-            // Calculate cost
-            for model in session.modelsUsed {
-                // Calculate proportional cost per model (simplified - uses total tokens)
-                let tokenUsage = TokenUsage(
-                    inputTokens: session.inputTokens,
-                    outputTokens: session.outputTokens,
-                    cacheCreationTokens: session.cacheCreationTokens,
-                    cacheReadTokens: session.cacheReadTokens
+            // Session token totals are the sum across models; cost prices each model on its own
+            // tokens (the previous code billed the whole session at one arbitrary model's rate).
+            for (model, totals) in perModel {
+                session.inputTokens += totals.inputTokens
+                session.outputTokens += totals.outputTokens
+                session.cacheCreationTokens += totals.cacheCreationTokens
+                session.cacheReadTokens += totals.cacheReadTokens
+                session.totalCost += await pricingService.calculateCost(
+                    model: model,
+                    usage: TokenUsage(
+                        inputTokens: totals.inputTokens,
+                        outputTokens: totals.outputTokens,
+                        cacheCreationTokens: totals.cacheCreationTokens,
+                        cacheReadTokens: totals.cacheReadTokens,
+                        cacheCreation1hTokens: totals.cacheCreation1hTokens
+                    )
                 )
-                session.totalCost = await pricingService.calculateCost(model: model, usage: tokenUsage)
-                break // Use first model's pricing for simplicity
             }
 
             sessions.append(session)
