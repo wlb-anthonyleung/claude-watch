@@ -58,7 +58,10 @@ struct ClaudeWatchApp: App {
     /// delete the store and rebuild. If even that fails we fall back to an in-memory store
     /// so the app still launches and shows live data (just without cross-launch persistence).
     private static func makeContainer() -> ModelContainer {
-        let schema = Schema([DailyUsage.self, ModelUsage.self, SessionUsage.self])
+        let schema = Schema([
+            DailyUsage.self, ModelUsage.self, SessionUsage.self,
+            ParsedFileCursor.self, SeenMessageKey.self,
+        ])
         let storeURL = URL.applicationSupportDirectory
             .appending(path: "ClaudeWatch/ClaudeWatch.store")
         try? FileManager.default.createDirectory(

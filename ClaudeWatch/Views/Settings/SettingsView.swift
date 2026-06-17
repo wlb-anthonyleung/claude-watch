@@ -65,6 +65,10 @@ struct SettingsView: View {
             try modelContext.delete(model: SessionUsage.self)
             try modelContext.delete(model: ModelUsage.self)
             try modelContext.delete(model: DailyUsage.self)
+            // Also clear ingest state, or the next poll would skip every (unchanged) file
+            // because its cursor still points at end-of-file — leaving the dashboard empty.
+            try modelContext.delete(model: ParsedFileCursor.self)
+            try modelContext.delete(model: SeenMessageKey.self)
             try modelContext.save()
             resetComplete = true
         } catch {
