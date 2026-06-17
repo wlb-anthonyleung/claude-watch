@@ -21,45 +21,20 @@ actor CCUsageService {
         self.conversationService = ConversationService(pricingService: pricingService)
     }
 
-    /// Fetches daily usage data since the given date.
-    func fetchUsage(since date: Date) async throws -> CCUsageResponse {
-        let dailyData = await conversationService.fetchDailyUsage(since: date)
-
-        // Convert to CCUsageResponse format
-        let daily = dailyData.map { day in
-            CCDailyEntry(
-                date: day.date,
-                inputTokens: day.inputTokens,
-                outputTokens: day.outputTokens,
-                cacheCreationTokens: day.cacheCreationTokens,
-                cacheReadTokens: day.cacheReadTokens,
-                totalTokens: day.totalTokens,
-                totalCost: day.totalCost,
-                modelsUsed: day.modelBreakdowns.map(\.modelName),
-                modelBreakdowns: day.modelBreakdowns.map { breakdown in
-                    CCModelBreakdown(
-                        modelName: breakdown.modelName,
-                        inputTokens: breakdown.inputTokens,
-                        outputTokens: breakdown.outputTokens,
-                        cacheCreationTokens: breakdown.cacheCreationTokens,
-                        cacheReadTokens: breakdown.cacheReadTokens,
-                        cost: breakdown.cost
-                    )
-                }
-            )
-        }
-
-        // Calculate totals
-        let totals = CCTotals(
-            inputTokens: daily.reduce(0) { $0 + $1.inputTokens },
-            outputTokens: daily.reduce(0) { $0 + $1.outputTokens },
-            cacheCreationTokens: daily.reduce(0) { $0 + $1.cacheCreationTokens },
-            cacheReadTokens: daily.reduce(0) { $0 + $1.cacheReadTokens },
-            totalCost: daily.reduce(0) { $0 + $1.totalCost },
-            totalTokens: daily.reduce(0) { $0 + $1.totalTokens }
+    /// Incrementally ingests new log entries, returning per-day deltas to persist.
+    /// See `ConversationService.ingest(...)` for semantics.
+    func ingestIncremental(
+        existingCursors: [String: FileCursor],
+        existingDayTotals: [String: [String: ModelTokenTotals]],
+        seenKeys: Set<String>,
+        sinceDay: String
+    ) async -> IngestResult {
+        await conversationService.ingest(
+            existingCursors: existingCursors,
+            existingDayTotals: existingDayTotals,
+            seenKeys: seenKeys,
+            sinceDay: sinceDay
         )
-
-        return CCUsageResponse(daily: daily, totals: totals)
     }
 
     /// Fetches session data for a specific date.

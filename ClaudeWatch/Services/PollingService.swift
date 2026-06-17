@@ -44,16 +44,12 @@ final class PollingService {
         lastError = nil
 
         do {
-            // Use startOfDay to ensure we capture all entries from the first day
-            let rawDate = Calendar.current.date(
-                byAdding: .day, value: -(AppConstants.rollingFetchDays - 1), to: Date()
-            )!
-            let sinceDate = Calendar.current.startOfDay(for: rawDate)
-            let response = try await ccUsageService.fetchUsage(since: sinceDate)
-            try persistResponse(response)
+            try await ingest()
             lastPollTime = Date()
         } catch {
             lastError = error.localizedDescription
+            // Discard any pending changes so the next poll starts from a clean snapshot.
+            modelContainer.mainContext.rollback()
         }
 
         isPolling = false
@@ -70,58 +66,190 @@ final class PollingService {
         }
     }
 
-    private func persistResponse(_ response: CCUsageResponse) throws {
+    // MARK: - Incremental Ingestion
+
+    /// Snapshots the current store, ingests only newly-appended log bytes, and applies the
+    /// resulting per-day deltas. A detected file truncation triggers a one-time full rebuild.
+    private func ingest() async throws {
         let context = modelContainer.mainContext
+        let calendar = Calendar.current
+        let now = Date()
 
-        for entry in response.daily {
-            let dateToMatch = entry.date
-            let predicate = #Predicate<DailyUsage> { usage in
-                usage.date == dateToMatch
-            }
-            let descriptor = FetchDescriptor<DailyUsage>(predicate: predicate)
-            let existing = try context.fetch(descriptor)
+        let dayFormatter = DateFormatter()
+        dayFormatter.locale = Locale(identifier: "en_US_POSIX")
+        dayFormatter.dateFormat = "yyyy-MM-dd"
 
-            let usage: DailyUsage
-            if let found = existing.first {
-                usage = found
-                usage.inputTokens = entry.inputTokens
-                usage.outputTokens = entry.outputTokens
-                usage.cacheCreationTokens = entry.cacheCreationTokens
-                usage.cacheReadTokens = entry.cacheReadTokens
-                usage.totalTokens = entry.totalTokens
-                usage.totalCost = entry.totalCost
-                usage.lastUpdated = Date()
+        func dayString(daysAgo days: Int) -> String {
+            let date = calendar.startOfDay(for: calendar.date(byAdding: .day, value: -(days - 1), to: now) ?? now)
+            return dayFormatter.string(from: date)
+        }
 
-                for breakdown in usage.modelBreakdowns {
-                    context.delete(breakdown)
-                }
-                usage.modelBreakdowns = []
-            } else {
-                usage = DailyUsage(
-                    date: entry.date,
-                    inputTokens: entry.inputTokens,
-                    outputTokens: entry.outputTokens,
-                    cacheCreationTokens: entry.cacheCreationTokens,
-                    cacheReadTokens: entry.cacheReadTokens,
-                    totalTokens: entry.totalTokens,
-                    totalCost: entry.totalCost
-                )
-                context.insert(usage)
-            }
+        // Lower bound for ingestion. Empty string keeps everything (no day sorts before "").
+        let sinceDay = AppConstants.rollingFetchDays.map { dayString(daysAgo: $0) } ?? ""
 
-            for mb in entry.modelBreakdowns {
-                let modelUsage = ModelUsage(
-                    modelName: mb.modelName,
+        // Optional retention bound for daily history (nil = keep forever). Never prune inside the
+        // fetch window, since a file's cursor has advanced past those bytes and couldn't rebuild.
+        let historyPruneDay: String? = AppConstants.maxHistoryDays.map {
+            dayString(daysAgo: max($0, AppConstants.rollingFetchDays ?? $0))
+        }
+
+        // Dedup keys are always bounded (source logs don't outlive this), independent of history.
+        let seenKeyPruneDay = dayString(daysAgo: AppConstants.seenKeyRetentionDays)
+
+        // Snapshot current DB state to feed the parser.
+        let cursorRows = try context.fetch(FetchDescriptor<ParsedFileCursor>())
+        var cursorMap: [String: FileCursor] = [:]
+        for c in cursorRows {
+            cursorMap[c.path] = FileCursor(byteOffset: c.byteOffset, lastSize: c.lastSize, lastModified: c.lastModified)
+        }
+
+        let dayRows = try context.fetch(FetchDescriptor<DailyUsage>())
+        var dayTotals: [String: [String: ModelTokenTotals]] = [:]
+        for d in dayRows {
+            var models: [String: ModelTokenTotals] = [:]
+            for mb in d.modelBreakdowns {
+                models[mb.modelName] = ModelTokenTotals(
                     inputTokens: mb.inputTokens,
                     outputTokens: mb.outputTokens,
                     cacheCreationTokens: mb.cacheCreationTokens,
-                    cacheReadTokens: mb.cacheReadTokens,
-                    cost: mb.cost
+                    cacheCreation1hTokens: mb.cacheCreation1hTokens,
+                    cacheReadTokens: mb.cacheReadTokens
                 )
-                usage.modelBreakdowns.append(modelUsage)
+            }
+            dayTotals[d.date] = models
+        }
+
+        let seenRows = try context.fetch(FetchDescriptor<SeenMessageKey>())
+        var seenSet = Set<String>(minimumCapacity: seenRows.count)
+        for s in seenRows { seenSet.insert(s.key) }
+
+        // With no cursors there is no incremental basis: every file is read from offset 0, so day
+        // totals must be rebuilt from scratch. Passing empty existing state (rather than the day
+        // rows) is what prevents double-counting — including when upgrading a store written by the
+        // earlier, pre-cursor layout, whose day rows would otherwise be added to a full re-parse.
+        let fullParse = cursorRows.isEmpty
+
+        var result = await ccUsageService.ingestIncremental(
+            existingCursors: cursorMap,
+            existingDayTotals: fullParse ? [:] : dayTotals,
+            seenKeys: fullParse ? [] : seenSet,
+            sinceDay: sinceDay
+        )
+
+        if result.needsFullRebuild || fullParse {
+            // Rebuild path: wipe derived rows in their own transaction so re-inserting the same
+            // #Unique keys can't collide with the rows being deleted. (For a truly fresh store
+            // these loops delete nothing.)
+            for d in dayRows { context.delete(d) }
+            for c in cursorRows { context.delete(c) }
+            for s in seenRows { context.delete(s) }
+            try context.save()
+
+            if result.needsFullRebuild {
+                // A tracked file shrank: the first pass ran against now-stale state, so recompute
+                // cleanly from empty. (A fullParse result is already computed from empty above.)
+                result = await ccUsageService.ingestIncremental(
+                    existingCursors: [:],
+                    existingDayTotals: [:],
+                    seenKeys: [],
+                    sinceDay: sinceDay
+                )
+            }
+            // Every row is now freshly created, in-window, and for a present file — nothing to
+            // prune or garbage-collect.
+            try apply(result, context: context)
+        } else {
+            try apply(result, context: context)
+
+            // Prune daily history only when a retention bound is set (nil = keep forever). Skip
+            // days we just re-priced — guard explicitly so a window change can never delete a day
+            // apply() just wrote.
+            if let historyPruneDay {
+                let changedDays = Set(result.changedDayAggregates.keys)
+                for d in dayRows where d.date < historyPruneDay && !changedDays.contains(d.date) {
+                    context.delete(d)
+                }
+            }
+            // Dedup keys are always bounded, independent of history retention.
+            for s in seenRows where s.day < seenKeyPruneDay {
+                context.delete(s)
+            }
+            // Garbage-collect cursors for log files that have since been deleted/cleaned up.
+            for c in cursorRows where !result.presentPaths.contains(c.path) {
+                context.delete(c)
             }
         }
 
         try context.save()
+    }
+
+    /// Applies one ingest result: upserts changed days, advances cursors, persists new dedup keys.
+    private func apply(_ result: IngestResult, context: ModelContext) throws {
+        for (date, models) in result.changedDayAggregates {
+            let targetDate = date
+            let descriptor = FetchDescriptor<DailyUsage>(
+                predicate: #Predicate { $0.date == targetDate }
+            )
+            let usage: DailyUsage
+            if let found = try context.fetch(descriptor).first {
+                usage = found
+                for mb in usage.modelBreakdowns { context.delete(mb) }
+                usage.modelBreakdowns = []
+            } else {
+                usage = DailyUsage(
+                    date: date, inputTokens: 0, outputTokens: 0,
+                    cacheCreationTokens: 0, cacheReadTokens: 0, totalTokens: 0, totalCost: 0
+                )
+                context.insert(usage)
+            }
+
+            var input = 0, output = 0, cacheCreate = 0, cacheRead = 0, cost = 0.0
+            for m in models {
+                usage.modelBreakdowns.append(ModelUsage(
+                    modelName: m.modelName,
+                    inputTokens: m.inputTokens,
+                    outputTokens: m.outputTokens,
+                    cacheCreationTokens: m.cacheCreationTokens,
+                    cacheReadTokens: m.cacheReadTokens,
+                    cost: m.cost,
+                    cacheCreation1hTokens: m.cacheCreation1hTokens
+                ))
+                input += m.inputTokens
+                output += m.outputTokens
+                cacheCreate += m.cacheCreationTokens
+                cacheRead += m.cacheReadTokens
+                cost += m.cost
+            }
+            usage.inputTokens = input
+            usage.outputTokens = output
+            usage.cacheCreationTokens = cacheCreate
+            usage.cacheReadTokens = cacheRead
+            usage.totalTokens = input + output + cacheCreate + cacheRead
+            usage.totalCost = cost
+            usage.lastUpdated = Date()
+        }
+
+        for (path, cursor) in result.updatedCursors {
+            let targetPath = path
+            let descriptor = FetchDescriptor<ParsedFileCursor>(
+                predicate: #Predicate { $0.path == targetPath }
+            )
+            if let existing = try context.fetch(descriptor).first {
+                existing.byteOffset = cursor.byteOffset
+                existing.lastSize = cursor.lastSize
+                existing.lastModified = cursor.lastModified
+            } else {
+                context.insert(ParsedFileCursor(
+                    path: path,
+                    byteOffset: cursor.byteOffset,
+                    lastSize: cursor.lastSize,
+                    lastModified: cursor.lastModified
+                ))
+            }
+        }
+
+        for record in result.newSeenKeys {
+            context.insert(SeenMessageKey(key: record.key, day: record.day))
+        }
     }
 }

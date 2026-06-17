@@ -3,11 +3,14 @@ import Foundation
 /// Aggregates conversation data by parsing ~/.claude conversation files.
 actor ConversationService {
     private let claudeDir: URL
+    private let projectsDir: URL
     private let pricingService: PricingService
 
     init(pricingService: PricingService = PricingService()) {
-        self.claudeDir = FileManager.default.homeDirectoryForCurrentUser
+        let claude = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".claude")
+        self.claudeDir = claude
+        self.projectsDir = claude.appendingPathComponent("projects")
         self.pricingService = pricingService
     }
 
@@ -107,95 +110,178 @@ actor ConversationService {
         }.sorted { $0.hour < $1.hour }
     }
 
-    // MARK: - Daily Usage
+    // MARK: - Incremental Ingestion
 
-    /// Fetches daily usage aggregated by date since the given date.
-    func fetchDailyUsage(since: Date) async -> [DailyUsageData] {
-        let jsonlFiles = findJSONLFiles()
-        let entries = await parseAllEntries(from: jsonlFiles, since: since)
+    /// Incrementally ingests new log entries since the last pass.
+    ///
+    /// For each `.jsonl` under `~/.claude/projects`, this reads only the bytes past the file's
+    /// cursor, deduplicates against `seenKeys`, and folds new tokens into `existingDayTotals`.
+    /// It returns fully re-priced aggregates for every day that changed, the advanced cursors,
+    /// and the newly-seen dedup keys. A first run (empty cursors) reads every file from offset 0.
+    ///
+    /// - Parameters:
+    ///   - existingCursors: prior ingest positions, keyed by absolute file path.
+    ///   - existingDayTotals: current cumulative per-day, per-model token totals from the DB.
+    ///   - seenKeys: every dedup key already counted (within the rolling window).
+    ///   - sinceDay: `yyyy-MM-dd` lower bound; entries older than this are ignored.
+    func ingest(
+        existingCursors: [String: FileCursor],
+        existingDayTotals: [String: [String: ModelTokenTotals]],
+        seenKeys: Set<String>,
+        sinceDay: String
+    ) async -> IngestResult {
+        var dayTotals = existingDayTotals
+        var seen = seenKeys
+        var newKeys: [SeenKeyRecord] = []
+        var updatedCursors: [String: FileCursor] = [:]
+        var presentPaths: Set<String> = []
+        var changedDays: Set<String> = []
+        var needsFullRebuild = false
 
-        // Group by date
-        var dailyMap: [String: DailyUsageData] = [:]
-        var modelMap: [String: [String: ModelBreakdownData]] = [:] // date -> model -> breakdown
+        for fileURL in findProjectJSONLFiles() {
+            let path = fileURL.path
+            presentPaths.insert(path)
 
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd"
+            // The enumerator prefetched these keys, so this reads cached values, not a new syscall.
+            let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+            let size = values?.fileSize ?? 0
+            let mtime = values?.contentModificationDate ?? .distantPast
 
-        for entry in entries {
-            guard let timestamp = entry.parsedTimestamp else { continue }
+            let cursor = existingCursors[path]
 
-            let dateStr = dateFormatter.string(from: timestamp)
-            let model = entry.message?.model ?? "unknown"
-
-            // Skip synthetic model (internal Claude Code operations, not real API calls)
-            if model == "<synthetic>" {
+            // Unchanged since last pass — skip without opening the file.
+            if let cursor, size == cursor.lastSize, mtime == cursor.lastModified {
                 continue
             }
 
-            // Initialize daily entry if needed
-            if dailyMap[dateStr] == nil {
-                dailyMap[dateStr] = DailyUsageData(
-                    date: dateStr,
-                    inputTokens: 0,
-                    outputTokens: 0,
-                    cacheCreationTokens: 0,
-                    cacheReadTokens: 0,
-                    totalCost: 0,
-                    modelBreakdowns: []
-                )
-                modelMap[dateStr] = [:]
+            var startOffset = 0
+            if let cursor {
+                if size < cursor.byteOffset {
+                    // File shrank: a counted contribution is gone. Only a full rebuild is correct.
+                    needsFullRebuild = true
+                    continue
+                }
+                startOffset = cursor.byteOffset
             }
 
-            // Update daily totals
-            let usage = entry.message?.usage
-            let inputTokens = usage?.inputTokens ?? 0
-            let outputTokens = usage?.outputTokens ?? 0
-            let cacheCreate = usage?.cacheCreationInputTokens ?? 0
-            let cacheRead = usage?.cacheReadInputTokens ?? 0
-
-            dailyMap[dateStr]?.inputTokens += inputTokens
-            dailyMap[dateStr]?.outputTokens += outputTokens
-            dailyMap[dateStr]?.cacheCreationTokens += cacheCreate
-            dailyMap[dateStr]?.cacheReadTokens += cacheRead
-
-            // Update model breakdown
-            if modelMap[dateStr]?[model] == nil {
-                modelMap[dateStr]?[model] = ModelBreakdownData(
-                    modelName: model,
-                    inputTokens: 0,
-                    outputTokens: 0,
-                    cacheCreationTokens: 0,
-                    cacheReadTokens: 0,
-                    cost: 0
-                )
-            }
-            modelMap[dateStr]?[model]?.inputTokens += inputTokens
-            modelMap[dateStr]?[model]?.outputTokens += outputTokens
-            modelMap[dateStr]?[model]?.cacheCreationTokens += cacheCreate
-            modelMap[dateStr]?[model]?.cacheReadTokens += cacheRead
+            let newOffset = parseTail(
+                fileURL,
+                from: startOffset,
+                sinceDay: sinceDay,
+                seen: &seen,
+                newKeys: &newKeys,
+                dayTotals: &dayTotals,
+                changedDays: &changedDays
+            )
+            updatedCursors[path] = FileCursor(byteOffset: newOffset, lastSize: size, lastModified: mtime)
         }
 
-        // Calculate costs using pricing service
-        for dateStr in dailyMap.keys {
-            guard var models = modelMap[dateStr] else { continue }
-
-            for modelName in models.keys {
-                guard var breakdown = models[modelName] else { continue }
-                let tokenUsage = TokenUsage(
-                    inputTokens: breakdown.inputTokens,
-                    outputTokens: breakdown.outputTokens,
-                    cacheCreationTokens: breakdown.cacheCreationTokens,
-                    cacheReadTokens: breakdown.cacheReadTokens
+        // Re-price every day that changed, using its full cumulative per-model totals.
+        var aggregates: [String: [ModelAggregate]] = [:]
+        for day in changedDays {
+            guard let models = dayTotals[day] else { continue }
+            var list: [ModelAggregate] = []
+            for (modelName, totals) in models {
+                let cost = await pricingService.calculateCost(
+                    model: modelName,
+                    usage: TokenUsage(
+                        inputTokens: totals.inputTokens,
+                        outputTokens: totals.outputTokens,
+                        cacheCreationTokens: totals.cacheCreationTokens,
+                        cacheReadTokens: totals.cacheReadTokens,
+                        cacheCreation1hTokens: totals.cacheCreation1hTokens
+                    )
                 )
-                breakdown.cost = await pricingService.calculateCost(model: modelName, usage: tokenUsage)
-                models[modelName] = breakdown
+                list.append(ModelAggregate(
+                    modelName: modelName,
+                    inputTokens: totals.inputTokens,
+                    outputTokens: totals.outputTokens,
+                    cacheCreationTokens: totals.cacheCreationTokens,
+                    cacheCreation1hTokens: totals.cacheCreation1hTokens,
+                    cacheReadTokens: totals.cacheReadTokens,
+                    cost: cost
+                ))
             }
-
-            dailyMap[dateStr]?.modelBreakdowns = Array(models.values)
-            dailyMap[dateStr]?.totalCost = models.values.reduce(0) { $0 + $1.cost }
+            aggregates[day] = list
         }
 
-        return dailyMap.values.sorted { $0.date < $1.date }
+        return IngestResult(
+            changedDayAggregates: aggregates,
+            updatedCursors: updatedCursors,
+            presentPaths: presentPaths,
+            newSeenKeys: newKeys,
+            needsFullRebuild: needsFullRebuild
+        )
+    }
+
+    /// Reads complete lines appended past `offset`, folding new usage into `dayTotals`.
+    ///
+    /// Only bytes up to the last newline are consumed; a partial trailing line (the file was
+    /// caught mid-append) is left for the next pass. Returns the new, line-aligned byte offset.
+    private func parseTail(
+        _ fileURL: URL,
+        from offset: Int,
+        sinceDay: String,
+        seen: inout Set<String>,
+        newKeys: inout [SeenKeyRecord],
+        dayTotals: inout [String: [String: ModelTokenTotals]],
+        changedDays: inout Set<String>
+    ) -> Int {
+        guard let handle = try? FileHandle(forReadingFrom: fileURL) else { return offset }
+        defer { try? handle.close() }
+
+        if offset > 0 {
+            do { try handle.seek(toOffset: UInt64(offset)) } catch { return offset }
+        }
+        guard let data = try? handle.readToEnd(), !data.isEmpty else { return offset }
+
+        // Consume only through the last complete line; re-read any partial trailing line next time.
+        guard let lastNewline = data.lastIndex(of: 0x0A) else { return offset }
+        let consumed = data.distance(from: data.startIndex, to: lastNewline) + 1
+        let block = data.prefix(consumed)
+
+        let decoder = JSONDecoder()
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+
+        for lineSlice in block.split(separator: 0x0A, omittingEmptySubsequences: true) {
+            guard let entry = try? decoder.decode(ParsedEntry.self, from: Data(lineSlice)),
+                  let usage = entry.message?.usage,
+                  let timestamp = entry.timestamp,
+                  let date = isoFormatter.date(from: timestamp) else {
+                continue
+            }
+
+            let model = entry.message?.model ?? "unknown"
+            // Skip synthetic model (internal Claude Code operations, not real API calls).
+            if model == "<synthetic>" { continue }
+
+            let day = dateFormatter.string(from: date)
+            // Ignore entries older than the rolling window (relevant only on a first/full pass).
+            if day < sinceDay { continue }
+
+            // Deduplicate using messageId + requestId (only when both are present), matching ccusage.
+            if let key = entry.dedupeKey {
+                if seen.contains(key) { continue }
+                seen.insert(key)
+                newKeys.append(SeenKeyRecord(key: key, day: day))
+            }
+
+            var models = dayTotals[day] ?? [:]
+            var totals = models[model] ?? ModelTokenTotals()
+            totals.inputTokens += usage.inputTokens ?? 0
+            totals.outputTokens += usage.outputTokens ?? 0
+            totals.cacheCreationTokens += usage.cacheCreationInputTokens ?? 0
+            totals.cacheCreation1hTokens += usage.cacheCreation1hTokens
+            totals.cacheReadTokens += usage.cacheReadInputTokens ?? 0
+            models[model] = totals
+            dayTotals[day] = models
+            changedDays.insert(day)
+        }
+
+        return offset + consumed
     }
 
     // MARK: - Session Usage
@@ -250,30 +336,39 @@ actor ConversationService {
                 modelsUsed: []
             )
 
-            // Aggregate tokens and models
+            // Aggregate tokens per model within the session (skip synthetic internal ops).
+            var perModel: [String: ModelTokenTotals] = [:]
             for entry in sorted {
+                let model = entry.message?.model ?? "unknown"
+                if model == "<synthetic>" { continue }
                 let usage = entry.message?.usage
-                session.inputTokens += usage?.inputTokens ?? 0
-                session.outputTokens += usage?.outputTokens ?? 0
-                session.cacheCreationTokens += usage?.cacheCreationInputTokens ?? 0
-                session.cacheReadTokens += usage?.cacheReadInputTokens ?? 0
-
-                if let model = entry.message?.model {
-                    session.modelsUsed.insert(model)
-                }
+                var totals = perModel[model] ?? ModelTokenTotals()
+                totals.inputTokens += usage?.inputTokens ?? 0
+                totals.outputTokens += usage?.outputTokens ?? 0
+                totals.cacheCreationTokens += usage?.cacheCreationInputTokens ?? 0
+                totals.cacheCreation1hTokens += usage?.cacheCreation1hTokens ?? 0
+                totals.cacheReadTokens += usage?.cacheReadInputTokens ?? 0
+                perModel[model] = totals
+                session.modelsUsed.insert(model)
             }
 
-            // Calculate cost
-            for model in session.modelsUsed {
-                // Calculate proportional cost per model (simplified - uses total tokens)
-                let tokenUsage = TokenUsage(
-                    inputTokens: session.inputTokens,
-                    outputTokens: session.outputTokens,
-                    cacheCreationTokens: session.cacheCreationTokens,
-                    cacheReadTokens: session.cacheReadTokens
+            // Session token totals are the sum across models; cost prices each model on its own
+            // tokens (the previous code billed the whole session at one arbitrary model's rate).
+            for (model, totals) in perModel {
+                session.inputTokens += totals.inputTokens
+                session.outputTokens += totals.outputTokens
+                session.cacheCreationTokens += totals.cacheCreationTokens
+                session.cacheReadTokens += totals.cacheReadTokens
+                session.totalCost += await pricingService.calculateCost(
+                    model: model,
+                    usage: TokenUsage(
+                        inputTokens: totals.inputTokens,
+                        outputTokens: totals.outputTokens,
+                        cacheCreationTokens: totals.cacheCreationTokens,
+                        cacheReadTokens: totals.cacheReadTokens,
+                        cacheCreation1hTokens: totals.cacheCreation1hTokens
+                    )
                 )
-                session.totalCost = await pricingService.calculateCost(model: model, usage: tokenUsage)
-                break // Use first model's pricing for simplicity
             }
 
             sessions.append(session)
@@ -362,6 +457,29 @@ actor ConversationService {
         guard let enumerator = fm.enumerator(
             at: claudeDir,
             includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        for case let fileURL as URL in enumerator {
+            if fileURL.pathExtension == "jsonl" {
+                files.append(fileURL)
+            }
+        }
+
+        return files
+    }
+
+    /// Enumerates `.jsonl` files under `~/.claude/projects` only — the conversation logs that
+    /// carry usage data. Narrower (and faster) than `findJSONLFiles`, which walks all of `~/.claude`.
+    private func findProjectJSONLFiles() -> [URL] {
+        let fm = FileManager.default
+        var files: [URL] = []
+
+        guard let enumerator = fm.enumerator(
+            at: projectsDir,
+            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey],
             options: [.skipsHiddenFiles]
         ) else {
             return []
@@ -466,12 +584,27 @@ private struct UsageInfo: Decodable {
     let outputTokens: Int?
     let cacheCreationInputTokens: Int?
     let cacheReadInputTokens: Int?
+    let cacheCreation: CacheCreationBreakdown?
+
+    /// Cache-creation tokens written with a 1-hour TTL — billed higher than 5-minute writes.
+    var cacheCreation1hTokens: Int {
+        cacheCreation?.ephemeral1hInputTokens ?? 0
+    }
 
     enum CodingKeys: String, CodingKey {
         case inputTokens = "input_tokens"
         case outputTokens = "output_tokens"
         case cacheCreationInputTokens = "cache_creation_input_tokens"
         case cacheReadInputTokens = "cache_read_input_tokens"
+        case cacheCreation = "cache_creation"
+    }
+}
+
+private struct CacheCreationBreakdown: Decodable {
+    let ephemeral1hInputTokens: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case ephemeral1hInputTokens = "ephemeral_1h_input_tokens"
     }
 }
 
