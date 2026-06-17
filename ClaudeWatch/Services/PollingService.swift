@@ -75,20 +75,26 @@ final class PollingService {
         let calendar = Calendar.current
         let now = Date()
 
-        let sinceDate = calendar.startOfDay(
-            for: calendar.date(byAdding: .day, value: -(AppConstants.rollingFetchDays - 1), to: now) ?? now
-        )
-        // Never prune anything still inside the fetch window: a file's cursor advances past a
-        // day's bytes, so a pruned-but-still-fetched day could never be rebuilt. Retain at least
-        // rollingFetchDays regardless of how maxHistoryDays is set.
-        let historyDays = max(AppConstants.maxHistoryDays, AppConstants.rollingFetchDays)
-        let pruneDate = calendar.startOfDay(
-            for: calendar.date(byAdding: .day, value: -(historyDays - 1), to: now) ?? now
-        )
         let dayFormatter = DateFormatter()
+        dayFormatter.locale = Locale(identifier: "en_US_POSIX")
         dayFormatter.dateFormat = "yyyy-MM-dd"
-        let sinceDay = dayFormatter.string(from: sinceDate)
-        let pruneDay = dayFormatter.string(from: pruneDate)
+
+        func dayString(daysAgo days: Int) -> String {
+            let date = calendar.startOfDay(for: calendar.date(byAdding: .day, value: -(days - 1), to: now) ?? now)
+            return dayFormatter.string(from: date)
+        }
+
+        // Lower bound for ingestion. Empty string keeps everything (no day sorts before "").
+        let sinceDay = AppConstants.rollingFetchDays.map { dayString(daysAgo: $0) } ?? ""
+
+        // Optional retention bound for daily history (nil = keep forever). Never prune inside the
+        // fetch window, since a file's cursor has advanced past those bytes and couldn't rebuild.
+        let historyPruneDay: String? = AppConstants.maxHistoryDays.map {
+            dayString(daysAgo: max($0, AppConstants.rollingFetchDays ?? $0))
+        }
+
+        // Dedup keys are always bounded (source logs don't outlive this), independent of history.
+        let seenKeyPruneDay = dayString(daysAgo: AppConstants.seenKeyRetentionDays)
 
         // Snapshot current DB state to feed the parser.
         let cursorRows = try context.fetch(FetchDescriptor<ParsedFileCursor>())
@@ -155,14 +161,17 @@ final class PollingService {
         } else {
             try apply(result, context: context)
 
-            // Prune rows older than the history window. Skip days we just re-priced (they are
-            // always >= sinceDay >= pruneDay, but guard explicitly so a future window change
-            // can never delete a day apply() just wrote).
-            let changedDays = Set(result.changedDayAggregates.keys)
-            for d in dayRows where d.date < pruneDay && !changedDays.contains(d.date) {
-                context.delete(d)
+            // Prune daily history only when a retention bound is set (nil = keep forever). Skip
+            // days we just re-priced — guard explicitly so a window change can never delete a day
+            // apply() just wrote.
+            if let historyPruneDay {
+                let changedDays = Set(result.changedDayAggregates.keys)
+                for d in dayRows where d.date < historyPruneDay && !changedDays.contains(d.date) {
+                    context.delete(d)
+                }
             }
-            for s in seenRows where s.day < pruneDay {
+            // Dedup keys are always bounded, independent of history retention.
+            for s in seenRows where s.day < seenKeyPruneDay {
                 context.delete(s)
             }
             // Garbage-collect cursors for log files that have since been deleted/cleaned up.
